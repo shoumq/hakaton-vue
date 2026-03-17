@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
-import type { UserRole } from '@/entities/user/model/types'
+import { useSession } from '@/features/session/model/session'
+import { getApiErrorMessage, submitEmployerVerification, updateEmployerCompany } from '@/shared/api'
+
+const router = useRouter()
+const session = useSession()
 
 const form = reactive({
-  role: 'applicant' as Exclude<UserRole, 'guest'>,
+  role: 'student' as 'student' | 'employer',
   email: '',
   displayName: '',
   password: '',
@@ -14,13 +19,66 @@ const form = reactive({
   website: '',
 })
 
+const errorMessage = ref('')
+const successMessage = ref('')
+
 const verificationSummary = computed(() => {
   if (form.role !== 'employer') {
-    return 'Для соискателя предварительная регистрация ограничивается email, отображаемым именем и паролем.'
+    return 'Для соискателя регистрация ограничивается email, отображаемым именем и паролем.'
   }
 
-  return 'Для работодателя нужна корпоративная почта, ИНН и сайт компании. После отправки карточка попадает к куратору на ручную верификацию.'
+  return 'Для работодателя можно сразу сохранить данные компании и отправить заявку на верификацию.'
 })
+
+async function handleRegister() {
+  errorMessage.value = ''
+  successMessage.value = ''
+
+  const result = await session.register({
+    email: form.email.trim(),
+    password: form.password,
+    display_name: form.displayName.trim(),
+    role: form.role,
+    company_name: form.role === 'employer' ? form.companyName.trim() : undefined,
+  })
+
+  if (!result.ok) {
+    errorMessage.value = result.message
+    return
+  }
+
+  if (form.role === 'employer') {
+    try {
+      await updateEmployerCompany({
+        legal_name: form.companyName.trim() || form.displayName.trim(),
+        brand_name: form.companyName.trim() || form.displayName.trim(),
+        website_url: form.website.trim() || undefined,
+        inn: form.inn.trim() || undefined,
+        email_domain: form.corporateEmail.includes('@') ? form.corporateEmail.split('@')[1] : undefined,
+      })
+
+      if (form.corporateEmail.trim()) {
+        await submitEmployerVerification({
+          corporate_email: form.corporateEmail.trim(),
+          inn_submitted: form.inn.trim() || undefined,
+          verification_method: 'website',
+          documents_comment: `Website: ${form.website.trim() || 'not provided'}`,
+        })
+      }
+
+      successMessage.value = 'Аккаунт и профиль компании созданы.'
+    } catch (error) {
+      successMessage.value = 'Аккаунт создан, но данные компании сохранились не полностью.'
+      errorMessage.value = getApiErrorMessage(error, 'Не удалось завершить настройку компании.')
+    }
+
+    await router.push('/dashboard/employer')
+    return
+  }
+
+  successMessage.value = 'Аккаунт создан.'
+  await router.push('/dashboard/applicant')
+}
 </script>
 
 <template>
@@ -37,36 +95,34 @@ const verificationSummary = computed(() => {
         <article class="explanation-card">
           <h2>Как работает верификация компании</h2>
           <p>
-            1. Работодатель указывает корпоративную почту, ИНН и сайт компании.
-            2. Платформа сверяет домен почты с доменом сайта.
-            3. Куратор проверяет документы и подтверждает компанию вручную.
+            После регистрации фронтенд может сохранить карточку компании через `PUT /api/employer/company`
+            и сразу отправить документы в `POST /api/employer/company-verifications`.
           </p>
         </article>
       </div>
 
-      <form class="register-card">
+      <form class="register-card" @submit.prevent="handleRegister">
         <label class="field">
           <span>Роль</span>
           <select v-model="form.role">
-            <option value="applicant">Соискатель</option>
+            <option value="student">Соискатель</option>
             <option value="employer">Работодатель</option>
-            <option value="curator">Куратор</option>
           </select>
         </label>
 
         <label class="field">
           <span>Email</span>
-          <input v-model="form.email" type="email" placeholder="name@example.com" />
+          <input v-model="form.email" type="email" placeholder="name@example.com" required />
         </label>
 
         <label class="field">
           <span>Отображаемое имя</span>
-          <input v-model="form.displayName" type="text" placeholder="Имя или название профиля" />
+          <input v-model="form.displayName" type="text" placeholder="Имя или название профиля" required />
         </label>
 
         <label class="field">
           <span>Пароль</span>
-          <input v-model="form.password" type="password" placeholder="Минимум 8 символов" />
+          <input v-model="form.password" type="password" placeholder="Минимум 8 символов" required />
         </label>
 
         <template v-if="form.role === 'employer'">
@@ -96,7 +152,12 @@ const verificationSummary = computed(() => {
           <p>{{ verificationSummary }}</p>
         </div>
 
-        <button type="button" class="primary-button">Зарегистрироваться</button>
+        <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+        <p v-if="successMessage" class="success-text">{{ successMessage }}</p>
+
+        <button type="submit" class="primary-button" :disabled="session.isLoading.value">
+          {{ session.isLoading.value ? 'Отправляем...' : 'Зарегистрироваться' }}
+        </button>
       </form>
     </section>
   </main>
@@ -106,26 +167,28 @@ const verificationSummary = computed(() => {
 .register-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
-  gap: 24px;
-  max-width: 1180px;
+  gap: 18px;
+  max-width: 1120px;
   margin: 0 auto;
 }
 
 .register-copy,
 .register-card {
   display: grid;
-  gap: 18px;
-  padding: 28px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  gap: 14px;
+  padding: 20px 22px;
+  border: 1px solid #d7dee7;
+  border-radius: 14px;
   background: var(--surface);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
 
 .eyebrow {
   margin: 0;
   color: var(--accent-strong);
-  font: 700 0.82rem/1 var(--font-mono);
-  letter-spacing: 0.04em;
+  font: 700 0.72rem/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 h1,
@@ -135,22 +198,23 @@ h2 {
 }
 
 h1 {
-  font-size: clamp(1.8rem, 4vw, 2.5rem);
-  line-height: 1.2;
+  font-size: clamp(1.45rem, 3vw, 1.9rem);
+  line-height: 1.15;
 }
 
 p {
   margin: 0;
   color: var(--muted);
-  line-height: 1.65;
+  line-height: 1.5;
+  font-size: 0.94rem;
 }
 
 .explanation-card,
 .summary-card {
   display: grid;
   gap: 8px;
-  padding: 18px;
-  border: 1px solid var(--border);
+  padding: 14px;
+  border: 1px solid #e4eaf1;
   border-radius: 10px;
   background: var(--surface-strong);
 }
@@ -162,18 +226,34 @@ p {
 
 .field input,
 .field select {
-  min-height: 48px;
-  padding: 0 14px;
-  border: 1px solid var(--border);
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #d7dee7;
   border-radius: 8px;
 }
 
 .primary-button {
-  min-height: 50px;
+  min-height: 40px;
   border: 1px solid var(--accent);
   border-radius: 8px;
   color: #fff;
   background: var(--accent);
+  font-size: 0.92rem;
+}
+
+.primary-button:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.error-text {
+  margin: 0;
+  color: var(--danger);
+}
+
+.success-text {
+  margin: 0;
+  color: var(--accent-strong);
 }
 
 @media (max-width: 900px) {

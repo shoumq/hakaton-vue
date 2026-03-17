@@ -1,4 +1,4 @@
-import { computed, reactive } from 'vue'
+import { computed, reactive, toValue } from 'vue'
 
 import type { Opportunity, OpportunityType, WorkFormat } from '@/entities/opportunity/model/types'
 
@@ -18,9 +18,9 @@ const state = reactive<OpportunityFilters>({
   salaryFrom: null,
 })
 
-export function useOpportunityFilters(source: Opportunity[]) {
+export function useOpportunityFilters(source: Opportunity[] | (() => Opportunity[])) {
   const filtered = computed(() =>
-    source.filter((opportunity) => {
+    toValue(source).filter((opportunity) => {
       const normalizedQuery = state.query.trim().toLowerCase()
 
       const matchesQuery =

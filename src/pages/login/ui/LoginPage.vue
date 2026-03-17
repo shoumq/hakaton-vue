@@ -7,12 +7,13 @@ import { useSession } from '@/features/session/model/session'
 const router = useRouter()
 const session = useSession()
 
-const email = ref('applicant@career.local')
-const password = ref('demo123')
+const authMode = ref<'student' | 'employer' | 'curator'>('student')
+const email = ref('')
+const password = ref('')
 const errorMessage = ref('')
 
 function resolveRoute(role: string) {
-  if (role === 'applicant') {
+  if (role === 'student') {
     return '/dashboard/applicant'
   }
 
@@ -23,8 +24,12 @@ function resolveRoute(role: string) {
   return '/dashboard/curator'
 }
 
-function handleLogin() {
-  const result = session.login(email.value, password.value)
+async function handleLogin() {
+  const result = await session.login(
+    email.value,
+    password.value,
+    authMode.value === 'curator' ? 'curator' : 'user',
+  )
 
   if (!result.ok) {
     errorMessage.value = result.message
@@ -32,7 +37,7 @@ function handleLogin() {
   }
 
   errorMessage.value = ''
-  router.push(resolveRoute(result.user.role))
+  await router.push(resolveRoute(result.user.role))
 }
 </script>
 
@@ -43,19 +48,21 @@ function handleLogin() {
         <p class="eyebrow">Авторизация</p>
         <h1>Вход в платформу для соискателей, работодателей и кураторов.</h1>
         <p>
-          После входа пользователь попадает в свой кабинет. Куратор по умолчанию существует в системе как
-          администратор и может заводить других кураторов.
+          Для соискателей и работодателей используется `POST /api/auth/login`, для кураторов
+          отдельная ручка `POST /api/auth/curator/login`.
         </p>
-
-        <div class="demo-box">
-          <p><strong>Демо-аккаунты</strong></p>
-          <p>`applicant@career.local / demo123`</p>
-          <p>`employer@career.local / demo123`</p>
-          <p>`admin@career.local / admin123`</p>
-        </div>
       </div>
 
       <form class="auth-card" @submit.prevent="handleLogin">
+        <label class="field">
+          <span>Сценарий входа</span>
+          <select v-model="authMode">
+            <option value="student">Соискатель</option>
+            <option value="employer">Работодатель</option>
+            <option value="curator">Куратор</option>
+          </select>
+        </label>
+
         <label class="field">
           <span>Email</span>
           <input v-model="email" type="email" required />
@@ -68,7 +75,9 @@ function handleLogin() {
 
         <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
 
-        <button class="primary-button" type="submit">Войти</button>
+        <button class="primary-button" type="submit" :disabled="session.isLoading.value">
+          {{ session.isLoading.value ? 'Входим...' : 'Войти' }}
+        </button>
         <RouterLink class="secondary-link" to="/register">Создать аккаунт</RouterLink>
       </form>
     </section>
@@ -79,48 +88,42 @@ function handleLogin() {
 .auth-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
-  gap: 24px;
-  max-width: 1180px;
+  gap: 18px;
+  max-width: 1120px;
   margin: 0 auto;
 }
 
 .auth-copy,
 .auth-card {
   display: grid;
-  gap: 18px;
-  padding: 28px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  gap: 14px;
+  padding: 20px 22px;
+  border: 1px solid #d7dee7;
+  border-radius: 14px;
   background: var(--surface);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
 
 .eyebrow {
   margin: 0;
   color: var(--accent-strong);
-  font: 700 0.82rem/1 var(--font-mono);
-  letter-spacing: 0.04em;
+  font: 700 0.72rem/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 h1 {
   margin: 0;
   font-family: var(--font-heading);
-  font-size: clamp(1.8rem, 4vw, 2.6rem);
-  line-height: 1.2;
+  font-size: clamp(1.45rem, 3vw, 1.9rem);
+  line-height: 1.15;
 }
 
 p {
   margin: 0;
   color: var(--muted);
-  line-height: 1.65;
-}
-
-.demo-box {
-  display: grid;
-  gap: 6px;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-strong);
+  line-height: 1.5;
+  font-size: 0.94rem;
 }
 
 .field {
@@ -128,10 +131,11 @@ p {
   gap: 8px;
 }
 
-.field input {
-  min-height: 48px;
-  padding: 0 14px;
-  border: 1px solid var(--border);
+.field input,
+.field select {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #d7dee7;
   border-radius: 8px;
 }
 
@@ -140,15 +144,21 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 48px;
+  min-height: 40px;
   border-radius: 8px;
   text-decoration: none;
+  font-size: 0.92rem;
 }
 
 .primary-button {
   border: 1px solid var(--accent);
   color: #fff;
   background: var(--accent);
+}
+
+.primary-button:disabled {
+  opacity: 0.65;
+  cursor: progress;
 }
 
 .secondary-link {

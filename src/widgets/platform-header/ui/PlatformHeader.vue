@@ -10,7 +10,7 @@ const session = useSession()
 
 const dashboardTarget = computed(() => {
   switch (session.role.value) {
-    case 'applicant':
+    case 'student':
       return '/dashboard/applicant'
     case 'employer':
       return '/dashboard/employer'
@@ -66,11 +66,11 @@ const isDashboardRoute = computed(() => route.path.startsWith('/dashboard'))
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 14px 24px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(10px);
-  box-shadow: var(--shadow-soft);
+  padding: 12px 24px;
+  border-bottom: 1px solid #d9e1ea;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
 
 .brand-block {
@@ -82,46 +82,49 @@ const isDashboardRoute = computed(() => route.path.startsWith('/dashboard'))
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  font: 700 1rem/1 var(--font-heading);
+  font: 700 1.02rem/1 var(--font-heading);
   text-decoration: none;
+  color: #1d2939;
 }
 
 .brand-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  background: var(--accent);
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: #0a66c2;
 }
 
 .brand-copy {
   margin: 0;
-  color: var(--muted);
-  font-size: 0.88rem;
+  color: #667085;
+  font-size: 0.8rem;
 }
 
 .header-nav {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
 }
 
 .nav-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid #d4dde7;
+  background: #fff;
   text-decoration: none;
-  color: var(--text);
+  color: #344054;
+  font-size: 0.9rem;
 }
 
 .nav-link.accent {
   color: #fff;
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: #0a66c2;
+  background: #0a66c2;
 }
 
 .button-link {

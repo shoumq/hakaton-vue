@@ -6,6 +6,7 @@ import { EmployerDashboardPage } from '@/pages/dashboard-employer'
 import { ApplicantDashboardPage } from '@/pages/dashboard-applicant'
 import { HomePage } from '@/pages/home'
 import { LoginPage } from '@/pages/login'
+import { OpportunityDetailsPage } from '@/pages/opportunity-details'
 import { RegisterPage } from '@/pages/register'
 
 const router = createRouter({
@@ -27,10 +28,15 @@ const router = createRouter({
       component: RegisterPage,
     },
     {
+      path: '/opportunities/:id',
+      name: 'opportunity-details',
+      component: OpportunityDetailsPage,
+    },
+    {
       path: '/dashboard/applicant',
       name: 'dashboard-applicant',
       component: ApplicantDashboardPage,
-      meta: { requiresRole: 'applicant' },
+      meta: { requiresRole: 'student' },
     },
     {
       path: '/dashboard/employer',
@@ -47,9 +53,11 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const session = useSession()
   const requiredRole = to.meta.requiresRole as string | undefined
+
+  await session.restoreSession()
 
   if (!requiredRole) {
     return true

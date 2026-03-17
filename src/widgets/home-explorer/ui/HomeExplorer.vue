@@ -1,292 +1,347 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
-import { opportunities } from '@/entities/opportunity/model/mock'
 import type { Opportunity } from '@/entities/opportunity/model/types'
 import OpportunityCard from '@/entities/opportunity/ui/OpportunityCard.vue'
 import { useFavorites } from '@/features/favorites/model/favorites'
 import { useOpportunityFilters } from '@/features/opportunity-filter/model/useOpportunityFilters'
+import { fetchPublicCatalog, getApiErrorMessage } from '@/shared/api'
 import { opportunityTypes, technologyTags, workFormats } from '@/shared/config/tags'
 import { pluralize } from '@/shared/lib/formatters'
+import MapLibreOpportunityCollectionMap from '@/shared/ui/MapLibreOpportunityCollectionMap.vue'
 
+const router = useRouter()
 const activeView = ref<'map' | 'list'>('map')
 const hoveredId = ref<string | null>(null)
+const opportunities = ref<Opportunity[]>([])
+const availableTechnologyTags = ref<string[]>([...technologyTags])
+const isLoading = ref(true)
+const errorMessage = ref('')
 
 const favorites = useFavorites()
-const { filters, filtered, reset } = useOpportunityFilters(opportunities)
+const { filters, filtered, reset } = useOpportunityFilters(() => opportunities.value)
 
 const hoveredOpportunity = computed<Opportunity | null>(
   () => filtered.value.find((item) => item.id === hoveredId.value) ?? null,
 )
 
-const mapBounds = {
-  minLat: 54,
-  maxLat: 60.5,
-  minLng: 29,
-  maxLng: 83.5,
+const mapPoints = computed(() =>
+  filtered.value.map((opportunity) => ({
+    id: opportunity.id,
+    title: opportunity.title,
+    companyName: opportunity.companyName,
+    latitude: opportunity.location.latitude,
+    longitude: opportunity.location.longitude,
+    isFavorite: favorites.has(opportunity.id),
+  })),
+)
+
+async function openOpportunity(id: string) {
+  await router.push(`/opportunities/${id}`)
 }
 
-function markerPosition(opportunity: Opportunity) {
-  const x =
-    ((opportunity.location.longitude - mapBounds.minLng) / (mapBounds.maxLng - mapBounds.minLng)) * 100
-  const y =
-    100 - ((opportunity.location.latitude - mapBounds.minLat) / (mapBounds.maxLat - mapBounds.minLat)) * 100
+onMounted(async () => {
+  isLoading.value = true
+  errorMessage.value = ''
 
-  return {
-    left: `${Math.max(6, Math.min(94, x))}%`,
-    top: `${Math.max(8, Math.min(92, y))}%`,
+  try {
+    const catalog = await fetchPublicCatalog()
+    opportunities.value = catalog.opportunities
+    const apiTechnologyTags = catalog.tags
+      .filter((tag) => tag.tag_type === 'technology')
+      .map((tag) => tag.name)
+      .sort((left, right) => left.localeCompare(right))
+
+    availableTechnologyTags.value = apiTechnologyTags.length ? apiTechnologyTags : [...technologyTags]
+  } catch (error) {
+    errorMessage.value = getApiErrorMessage(error, 'Не удалось загрузить витрину возможностей.')
+  } finally {
+    isLoading.value = false
   }
-}
+})
 </script>
 
 <template>
   <section class="explorer">
-    <div class="hero-panel">
-      <div>
-        <p class="eyebrow">Интерактивная карьерная платформа</p>
-        <h1>Поиск карьерных возможностей по карте, тегам, формату работы и уровню дохода.</h1>
-        <p class="hero-text">
-          На платформе собраны вакансии, стажировки, менторские программы и карьерные мероприятия.
-          Для гостей доступен поиск, карта и локальное избранное в браузере, для ролей есть отдельные кабинеты.
-        </p>
+    <p v-if="errorMessage" class="status-banner error">{{ errorMessage }}</p>
+    <p v-else-if="isLoading" class="status-banner">Загружаем витрину возможностей...</p>
+
+    <section v-if="activeView === 'map'" class="map-shell">
+      <MapLibreOpportunityCollectionMap
+        class="map-surface"
+        :points="mapPoints"
+        :active-id="hoveredId"
+        @hover="hoveredId = $event"
+        @select="openOpportunity"
+      />
+
+      <div class="map-overlay filters-overlay">
+        <div class="filter-panel">
+          <label class="field">
+            <span>Поиск</span>
+            <input v-model="filters.query" type="text" placeholder="Vue, Python, хакатон, Москва" />
+          </label>
+
+          <label class="field">
+            <span>Навык</span>
+            <select v-model="filters.technology">
+              <option value="all">Все теги</option>
+              <option v-for="tag in availableTechnologyTags" :key="tag" :value="tag">{{ tag }}</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Формат</span>
+            <select v-model="filters.workFormat">
+              <option value="all">Все форматы</option>
+              <option v-for="format in workFormats" :key="format" :value="format">{{ format }}</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Тип</span>
+            <select v-model="filters.opportunityType">
+              <option value="all">Все типы</option>
+              <option v-for="type in opportunityTypes" :key="type" :value="type">{{ type }}</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Зарплата от</span>
+            <input v-model.number="filters.salaryFrom" type="number" min="0" step="10000" placeholder="120000" />
+          </label>
+
+          <button class="ghost-button" type="button" @click="reset">Сбросить</button>
+        </div>
       </div>
 
-      <div class="stats-grid">
-        <article class="stat-card">
-          <strong>{{ opportunities.length }}</strong>
-          <span>возможностей в витрине</span>
-        </article>
-        <article class="stat-card">
-          <strong>3 роли</strong>
-          <span>соискатель, работодатель и куратор</span>
-        </article>
-        <article class="stat-card">
-          <strong>{{ favorites.ids.value.length }}</strong>
-          <span>элементов сохранено локально</span>
-        </article>
-      </div>
-    </div>
+      <div class="map-overlay toolbar-overlay">
+        <div class="toolbar-card">
+          <p class="results-copy">
+            Найдено {{ filtered.length }} {{ pluralize(filtered.length, 'возможность', 'возможности', 'возможностей') }}
+          </p>
 
-    <div class="filter-panel">
-      <label class="field">
-        <span>Поиск</span>
-        <input v-model="filters.query" type="text" placeholder="Например, Vue, Python, хакатон, Москва" />
-      </label>
-
-      <label class="field">
-        <span>Навык</span>
-        <select v-model="filters.technology">
-          <option value="all">Все теги</option>
-          <option v-for="tag in technologyTags" :key="tag" :value="tag">{{ tag }}</option>
-        </select>
-      </label>
-
-      <label class="field">
-        <span>Формат</span>
-        <select v-model="filters.workFormat">
-          <option value="all">Все форматы</option>
-          <option v-for="format in workFormats" :key="format" :value="format">{{ format }}</option>
-        </select>
-      </label>
-
-      <label class="field">
-        <span>Тип</span>
-        <select v-model="filters.opportunityType">
-          <option value="all">Все типы</option>
-          <option v-for="type in opportunityTypes" :key="type" :value="type">{{ type }}</option>
-        </select>
-      </label>
-
-      <label class="field">
-        <span>Зарплата от</span>
-        <input v-model.number="filters.salaryFrom" type="number" min="0" step="10000" placeholder="120000" />
-      </label>
-
-      <button class="ghost-button" type="button" @click="reset">Сбросить</button>
-    </div>
-
-    <div class="toolbar">
-      <p class="results-copy">
-        Найдено {{ filtered.length }} {{ pluralize(filtered.length, 'возможность', 'возможности', 'возможностей') }}
-      </p>
-
-      <div class="view-switcher">
-        <button
-          type="button"
-          class="view-button"
-          :class="{ active: activeView === 'map' }"
-          @click="activeView = 'map'"
-        >
-          Карта
-        </button>
-        <button
-          type="button"
-          class="view-button"
-          :class="{ active: activeView === 'list' }"
-          @click="activeView = 'list'"
-        >
-          Лента
-        </button>
-      </div>
-    </div>
-
-    <div class="content-grid">
-      <section v-if="activeView === 'map'" class="map-panel">
-        <div class="map-stage">
-          <div class="map-surface">
-            <div
-              v-for="opportunity in filtered"
-              :key="opportunity.id"
-              class="marker"
-              :class="{ favorite: favorites.has(opportunity.id), hovered: hoveredId === opportunity.id }"
-              :style="markerPosition(opportunity)"
-              @mouseenter="hoveredId = opportunity.id"
-              @mouseleave="hoveredId = null"
+          <div class="view-switcher">
+            <button
+              type="button"
+              class="view-button active"
+              @click="activeView = 'map'"
             >
-              <span class="marker-dot"></span>
-            </div>
-          </div>
-
-          <div class="map-legend">
-            <span><i class="legend-dot"></i> стандартный маркер</span>
-            <span><i class="legend-dot favorite"></i> компания или возможность в избранном</span>
+              Карта
+            </button>
+            <button
+              type="button"
+              class="view-button"
+              @click="activeView = 'list'"
+            >
+              Лента
+            </button>
           </div>
         </div>
+      </div>
 
-        <aside class="hover-card">
-          <OpportunityCard
-            v-if="hoveredOpportunity"
-            :opportunity="hoveredOpportunity"
-            compact
-          />
-          <div v-else class="hover-placeholder">
-            Наведи на маркер, чтобы увидеть компактную карточку возможности.
-          </div>
-        </aside>
-      </section>
-
-      <section v-else class="feed-panel">
-        <OpportunityCard v-for="opportunity in filtered" :key="opportunity.id" :opportunity="opportunity" />
-      </section>
-
-      <aside class="extra-panel">
-        <article class="info-card">
-          <p class="card-eyebrow">Дополнительная функция</p>
-          <h2>Сохранение избранного без аккаунта</h2>
-          <p>
-            Даже неавторизованный пользователь может отмечать компании и возможности как избранные. Данные
-            сохраняются в браузере, а на карте такие элементы подсвечиваются отдельным цветом.
-          </p>
-        </article>
-
-        <article class="info-card">
-          <p class="card-eyebrow">Верификация работодателя</p>
-          <h2>Корпоративная почта + ИНН + ручная модерация</h2>
-          <p>
-            Это снижает риск фейковых карточек и даёт куратору понятную очередь проверки компаний перед публикацией.
-          </p>
-        </article>
+      <aside class="map-overlay details-overlay">
+        <OpportunityCard
+          v-if="hoveredOpportunity"
+          :opportunity="hoveredOpportunity"
+          compact
+        />
+        <div v-else class="hover-placeholder">
+          Наведи на маркер, чтобы увидеть карточку возможности.
+        </div>
       </aside>
-    </div>
+
+      <div class="map-overlay legend-overlay">
+        <div class="map-legend">
+          <span><i class="legend-dot"></i> стандартный маркер</span>
+          <span><i class="legend-dot favorite"></i> в избранном</span>
+        </div>
+      </div>
+    </section>
+
+    <section v-else class="list-shell">
+      <div class="list-topbar">
+        <div class="filter-panel compact">
+          <label class="field">
+            <span>Поиск</span>
+            <input v-model="filters.query" type="text" placeholder="Vue, Python, хакатон, Москва" />
+          </label>
+
+          <label class="field">
+            <span>Навык</span>
+            <select v-model="filters.technology">
+              <option value="all">Все теги</option>
+              <option v-for="tag in availableTechnologyTags" :key="tag" :value="tag">{{ tag }}</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Формат</span>
+            <select v-model="filters.workFormat">
+              <option value="all">Все форматы</option>
+              <option v-for="format in workFormats" :key="format" :value="format">{{ format }}</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Тип</span>
+            <select v-model="filters.opportunityType">
+              <option value="all">Все типы</option>
+              <option v-for="type in opportunityTypes" :key="type" :value="type">{{ type }}</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Зарплата от</span>
+            <input v-model.number="filters.salaryFrom" type="number" min="0" step="10000" placeholder="120000" />
+          </label>
+
+          <button class="ghost-button" type="button" @click="reset">Сбросить</button>
+        </div>
+
+        <div class="toolbar-card">
+          <p class="results-copy">
+            Найдено {{ filtered.length }} {{ pluralize(filtered.length, 'возможность', 'возможности', 'возможностей') }}
+          </p>
+
+          <div class="view-switcher">
+            <button
+              type="button"
+              class="view-button"
+              @click="activeView = 'map'"
+            >
+              Карта
+            </button>
+            <button
+              type="button"
+              class="view-button active"
+              @click="activeView = 'list'"
+            >
+              Лента
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="feed-panel">
+        <OpportunityCard v-for="opportunity in filtered" :key="opportunity.id" :opportunity="opportunity" />
+      </div>
+    </section>
   </section>
 </template>
 
 <style scoped>
-.explorer,
-.hero-panel,
-.filter-panel,
-.content-grid,
-.toolbar,
-.stats-grid,
-.view-switcher,
-.map-panel {
-  display: grid;
-  gap: 20px;
-}
-
 .explorer {
-  max-width: 1380px;
+  max-width: 100%;
   margin: 0 auto;
+  display: grid;
+  gap: 12px;
 }
 
-.hero-panel,
-.filter-panel,
-.map-panel,
-.feed-panel,
-.extra-panel,
-.info-card {
-  border: 1px solid var(--border);
+.status-banner {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #d7dee7;
   border-radius: 12px;
   background: var(--surface);
-  box-shadow: var(--shadow-soft);
+  font-size: 0.9rem;
 }
 
-.hero-panel {
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
-  padding: 24px;
+.status-banner.error {
+  color: var(--danger);
 }
 
-.eyebrow,
-.card-eyebrow {
-  margin: 0 0 10px;
-  color: var(--accent-strong);
-  font: 700 0.82rem/1 var(--font-mono);
-  letter-spacing: 0.04em;
+.map-shell {
+  position: relative;
+  height: calc(100vh - 140px);
+  min-height: calc(100vh - 140px);
+  border: 1px solid #d7dee7;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #dfe7ef;
 }
 
-h1,
-h2 {
-  margin: 0 0 14px;
-  font-family: var(--font-heading);
+.map-surface {
+  position: absolute;
+  inset: 0;
+  display: block;
 }
 
-h1 {
-  font-size: clamp(1.9rem, 4vw, 2.8rem);
-  line-height: 1.15;
+.map-overlay {
+  position: absolute;
+  z-index: 2;
 }
 
-h2 {
-  font-size: 1.35rem;
+.filters-overlay {
+  top: 16px;
+  left: 16px;
+  right: 16px;
 }
 
-.hero-text,
-.info-card p,
-.results-copy {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.65;
+.toolbar-overlay {
+  top: 136px;
+  left: 16px;
 }
 
-.stats-grid {
-  grid-template-columns: repeat(1, minmax(0, 1fr));
+.details-overlay {
+  right: 16px;
+  top: 208px;
+  width: min(360px, calc(100% - 32px));
 }
 
-.stat-card {
-  display: grid;
-  gap: 6px;
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-strong);
+.legend-overlay {
+  left: 16px;
+  bottom: 16px;
 }
 
-.stat-card strong {
-  font-size: 1.5rem;
-  font-family: var(--font-heading);
+.filter-panel,
+.toolbar-card,
+.map-legend,
+.hover-placeholder,
+.list-topbar,
+.feed-panel {
+  border: 1px solid #d7dee7;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(10px);
 }
 
 .filter-panel {
+  display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  padding: 20px;
+  gap: 10px;
+  padding: 12px;
+}
+
+.filter-panel.compact {
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  backdrop-filter: none;
+}
+
+.toolbar-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+}
+
+.results-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.4;
+  font-size: 0.9rem;
 }
 
 .field {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .field span {
-  font-size: 0.88rem;
+  font-size: 0.78rem;
   color: var(--muted);
 }
 
@@ -294,11 +349,12 @@ h2 {
 .field select,
 .ghost-button,
 .view-button {
-  min-height: 46px;
-  padding: 0 14px;
-  border: 1px solid var(--border);
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #d7dee7;
   border-radius: 8px;
-  background: var(--surface);
+  background: #fff;
+  font-size: 0.9rem;
 }
 
 .ghost-button,
@@ -306,13 +362,10 @@ h2 {
   cursor: pointer;
 }
 
-.toolbar {
-  grid-template-columns: 1fr auto;
-  align-items: center;
-}
-
 .view-switcher {
+  display: grid;
   grid-auto-flow: column;
+  gap: 8px;
 }
 
 .view-button.active {
@@ -321,149 +374,111 @@ h2 {
   background: var(--accent);
 }
 
-.content-grid {
-  grid-template-columns: minmax(0, 1.3fr) 320px;
-  align-items: start;
-}
-
-.map-panel {
-  padding: 20px;
-}
-
-.map-stage {
+.hover-placeholder {
   display: grid;
-  gap: 14px;
-}
-
-.map-surface {
-  position: relative;
-  min-height: 520px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2f6 100%);
-  overflow: hidden;
-}
-
-.map-surface::before,
-.map-surface::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-}
-
-.map-surface::before {
-  background:
-    linear-gradient(rgba(148, 163, 184, 0.18) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.18) 1px, transparent 1px);
-  background-size: 64px 64px;
-}
-
-.map-surface::after {
-  background:
-    radial-gradient(circle at 20% 75%, rgba(148, 163, 184, 0.18), transparent 16%),
-    radial-gradient(circle at 50% 55%, rgba(148, 163, 184, 0.12), transparent 20%),
-    radial-gradient(circle at 78% 25%, rgba(148, 163, 184, 0.14), transparent 16%);
-}
-
-.marker {
-  position: absolute;
-  z-index: 1;
-  width: 22px;
-  height: 22px;
-  transform: translate(-50%, -50%);
-  cursor: pointer;
-}
-
-.marker-dot {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 3px solid #fff;
-  border-radius: 999px;
-  background: #5b6b7f;
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.18);
-}
-
-.marker.favorite .marker-dot {
-  background: var(--accent);
-}
-
-.marker.hovered {
-  z-index: 2;
-  transform: translate(-50%, -50%) scale(1.2);
+  place-items: center;
+  min-height: 180px;
+  padding: 20px;
+  color: var(--muted);
+  text-align: center;
 }
 
 .map-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 18px;
+  gap: 12px;
+  padding: 10px 12px;
   color: var(--muted);
-  font-size: 0.92rem;
+  font-size: 0.86rem;
+}
+
+.map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .legend-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  margin-right: 8px;
+  width: 12px;
+  height: 12px;
   border-radius: 999px;
-  background: #315074;
-}
-
-.legend-dot.favorite {
   background: var(--accent);
 }
 
-.hover-card {
-  min-height: 100%;
+.legend-dot.favorite {
+  background: #12756e;
 }
 
-.hover-placeholder {
+.list-shell {
   display: grid;
-  place-items: center;
-  min-height: 220px;
-  padding: 20px;
-  border-radius: 10px;
-  border: 1px dashed var(--border);
-  color: var(--muted);
-  background: var(--surface-strong);
-  text-align: center;
+  gap: 14px;
 }
 
-.feed-panel,
-.extra-panel {
+.list-topbar {
   display: grid;
-  gap: 16px;
-  padding: 20px;
+  gap: 12px;
+  padding: 12px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  backdrop-filter: none;
 }
 
-.info-card {
-  padding: 20px;
+.feed-panel {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  backdrop-filter: none;
 }
 
-@media (max-width: 1180px) {
-  .content-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 1100px) {
+  .filter-panel {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .toolbar-overlay {
+    top: 184px;
+  }
+
+  .details-overlay {
+    top: auto;
+    right: 16px;
+    left: 16px;
+    bottom: 68px;
+    width: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .map-shell {
+    height: calc(100vh - 120px);
+    min-height: calc(100vh - 120px);
+  }
+
+  .filters-overlay,
+  .toolbar-overlay,
+  .details-overlay,
+  .legend-overlay {
+    left: 12px;
+    right: 12px;
   }
 
   .filter-panel {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 840px) {
-  .hero-panel,
-  .toolbar,
-  .map-panel {
     grid-template-columns: 1fr;
   }
 
-  .filter-panel {
-    grid-template-columns: 1fr;
+  .toolbar-overlay {
+    top: 312px;
   }
 
-  .map-surface {
-    min-height: 380px;
+  .toolbar-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .details-overlay {
+    bottom: 60px;
   }
 }
 </style>

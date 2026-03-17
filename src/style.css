@@ -1,19 +1,19 @@
 :root {
-  --bg: #f3f5f7;
+  --bg: #f4f6f8;
   --surface: #ffffff;
-  --surface-strong: #f8fafc;
+  --surface-strong: #f8fafb;
   --surface-muted: #eef2f6;
-  --text: #1f2937;
+  --text: #1d2939;
   --muted: #667085;
-  --border: #d8e0ea;
-  --border-strong: #c4cfdb;
+  --border: #d7dee7;
+  --border-strong: #c8d3df;
   --accent: #0a66c2;
   --accent-strong: #004182;
   --accent-soft: #e8f1fb;
   --success: #137333;
   --danger: #b42318;
-  --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
-  --shadow-soft: 0 2px 8px rgba(15, 23, 42, 0.05);
+  --shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.05);
   --font-sans: 'Segoe UI', Arial, sans-serif;
   --font-heading: 'Segoe UI', Arial, sans-serif;
   --font-mono: 'SFMono-Regular', Consolas, monospace;
@@ -70,47 +70,11 @@ code {
 
 .page-shell {
   min-height: 100vh;
-  padding: 24px;
+  padding: 20px 24px 28px;
 }
 
 @media (max-width: 768px) {
   .page-shell {
     padding: 16px;
-  }
-}
-      width: 100%;
-      justify-content: center;
-      box-sizing: border-box;
-    }
-  }
-}
-
-#spacer {
-  height: 88px;
-  border-top: 1px solid var(--border);
-  @media (max-width: 1024px) {
-    height: 48px;
-  }
-}
-
-.ticks {
-  position: relative;
-  width: 100%;
-
-  &::before,
-  &::after {
-    content: '';
-    position: absolute;
-    top: -4.5px;
-    border: 5px solid transparent;
-  }
-
-  &::before {
-    left: 0;
-    border-left-color: var(--border);
-  }
-  &::after {
-    right: 0;
-    border-right-color: var(--border);
   }
 }

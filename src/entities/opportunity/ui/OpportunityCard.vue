@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
 
 import type { Opportunity } from '@/entities/opportunity/model/types'
 import { useFavorites } from '@/features/favorites/model/favorites'
@@ -42,7 +43,11 @@ const formatLabels = {
     <div class="card-main">
       <div>
         <p class="company">{{ opportunity.companyName }}</p>
-        <h3>{{ opportunity.title }}</h3>
+        <h3>
+          <RouterLink :to="`/opportunities/${opportunity.id}`" class="title-link">
+            {{ opportunity.title }}
+          </RouterLink>
+        </h3>
       </div>
       <p class="summary">{{ opportunity.summary }}</p>
     </div>
@@ -76,17 +81,17 @@ const formatLabels = {
 <style scoped>
 .opportunity-card {
   display: grid;
-  gap: 18px;
-  padding: 20px;
-  border: 1px solid var(--border);
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #d7dee7;
   border-radius: 12px;
   background: var(--surface);
-  box-shadow: var(--shadow-soft);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
 
 .opportunity-card.compact {
-  gap: 14px;
-  padding: 18px;
+  gap: 12px;
+  padding: 14px;
 }
 
 .card-topline,
@@ -104,31 +109,42 @@ const formatLabels = {
 }
 
 .favorite-button {
-  border: 1px solid var(--border);
+  border: 1px solid #d1dae5;
   border-radius: 8px;
-  padding: 9px 12px;
+  padding: 7px 10px;
   color: var(--accent-strong);
   background: var(--surface);
   cursor: pointer;
+  font-size: 0.86rem;
 }
 
 .company {
   margin: 0 0 8px;
   color: var(--accent-strong);
-  font: 700 0.92rem/1 var(--font-mono);
+  font: 700 0.78rem/1 var(--font-mono);
   letter-spacing: 0.04em;
 }
 
 h3 {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1rem;
   line-height: 1.25;
 }
 
 .summary {
   margin: 0;
   color: var(--muted);
-  line-height: 1.65;
+  line-height: 1.5;
+  font-size: 0.92rem;
+}
+
+.title-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.title-link:hover {
+  color: var(--accent-strong);
 }
 
 .pill,
@@ -136,10 +152,10 @@ h3 {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
-  padding: 0 10px;
+  padding: 0 9px;
   border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: 0.82rem;
+  border: 1px solid #d9e1ea;
+  font-size: 0.74rem;
 }
 
 .pill {
@@ -162,23 +178,24 @@ h3 {
 }
 
 .meta-grid div {
-  padding: 12px 14px;
-  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border: 1px solid #e4eaf1;
   border-radius: 10px;
   background: var(--surface-strong);
 }
 
 dt {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
 dd {
   margin: 0;
-  line-height: 1.5;
+  line-height: 1.35;
+  font-size: 0.9rem;
 }
 
 @media (max-width: 680px) {
