@@ -67,10 +67,10 @@ const isDashboardRoute = computed(() => route.path.startsWith('/dashboard'))
   justify-content: space-between;
   gap: 24px;
   padding: 12px 24px;
-  border-bottom: 1px solid #d9e1ea;
-  background: rgba(255, 255, 255, 0.98);
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(12px);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  box-shadow: var(--shadow-soft);
 }
 
 .brand-block {
@@ -84,19 +84,19 @@ const isDashboardRoute = computed(() => route.path.startsWith('/dashboard'))
   gap: 10px;
   font: 700 1.02rem/1 var(--font-heading);
   text-decoration: none;
-  color: #1d2939;
+  color: var(--text);
 }
 
 .brand-dot {
   width: 12px;
   height: 12px;
   border-radius: 3px;
-  background: #0a66c2;
+  background: var(--accent);
 }
 
 .brand-copy {
   margin: 0;
-  color: #667085;
+  color: var(--muted);
   font-size: 0.8rem;
 }
 
@@ -114,17 +114,27 @@ const isDashboardRoute = computed(() => route.path.startsWith('/dashboard'))
   min-height: 34px;
   padding: 0 12px;
   border-radius: 9px;
-  border: 1px solid #d4dde7;
-  background: #fff;
+  border: 1px solid var(--border);
+  background: var(--surface);
   text-decoration: none;
-  color: #344054;
+  color: var(--text);
   font-size: 0.9rem;
 }
 
 .nav-link.accent {
   color: #fff;
-  border-color: #0a66c2;
-  background: #0a66c2;
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.nav-link:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
+}
+
+.nav-link.accent:hover {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
 }
 
 .button-link {

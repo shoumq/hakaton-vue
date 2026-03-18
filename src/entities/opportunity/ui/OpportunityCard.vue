@@ -122,7 +122,6 @@ const formatLabels = {
   margin: 0 0 8px;
   color: var(--accent-strong);
   font: 700 0.78rem/1 var(--font-mono);
-  letter-spacing: 0.04em;
 }
 
 h3 {
@@ -189,7 +188,6 @@ dt {
   color: var(--muted);
   font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
 }
 
 dd {

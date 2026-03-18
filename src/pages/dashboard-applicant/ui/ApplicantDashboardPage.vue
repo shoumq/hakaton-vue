@@ -477,7 +477,6 @@ onMounted(async () => {
   color: #526581;
   font-size: 0.7rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -491,7 +490,6 @@ h2 {
 h1 {
   font-size: 1.8rem;
   line-height: 1.08;
-  letter-spacing: -0.03em;
 }
 
 h2 {
@@ -578,7 +576,6 @@ h2 {
   font-size: 0.7rem;
   color: #667085;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .fact-card strong {

@@ -1,20 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 
 import { useSession } from '@/features/session/model/session'
 import {
-  fetchCuratorAuditLogs,
   fetchCuratorCompanyVerifications,
   fetchCuratorModerationQueue,
   getApiErrorMessage,
   uploadMyAvatar,
 } from '@/shared/api'
-import type { AuditLogDto, ModerationQueueItemDto, VerificationDto } from '@/shared/api'
+import type { ModerationQueueItemDto, VerificationDto } from '@/shared/api'
 
 const session = useSession()
 const moderationQueue = ref<ModerationQueueItemDto[]>([])
 const companyVerifications = ref<VerificationDto[]>([])
-const auditLogs = ref<AuditLogDto[]>([])
 const isLoading = ref(true)
 const errorMessage = ref('')
 const avatarError = ref('')
@@ -57,6 +56,10 @@ async function handleAvatarChange(event: Event) {
 }
 
 function getQueueTitle(item: ModerationQueueItemDto | VerificationDto) {
+  if ('company_name' in item && typeof item.company_name === 'string' && item.company_name) {
+    return item.company_name
+  }
+
   if ('title' in item && typeof item.title === 'string' && item.title) {
     return item.title
   }
@@ -100,20 +103,37 @@ function getQueueDetails(item: ModerationQueueItemDto | VerificationDto) {
   return 'Дополнительные детали не указаны.'
 }
 
+function getCompanyVerificationRoute(item: ModerationQueueItemDto | VerificationDto) {
+  if ('company_id' in item && item.company_id && item.id) {
+    return `/dashboard/curator/companies/${item.id}`
+  }
+
+  if ('entity_type' in item && item.entity_type === 'company') {
+    const targetId =
+      ('entity_id' in item && typeof item.entity_id === 'string' && item.entity_id) ||
+      (typeof item.id === 'string' && item.id) ||
+      ''
+
+    if (targetId) {
+      return `/dashboard/curator/companies/${targetId}`
+    }
+  }
+
+  return null
+}
+
 onMounted(async () => {
   isLoading.value = true
   errorMessage.value = ''
 
   try {
-    const [queue, verifications, logs] = await Promise.all([
+    const [queue, verifications] = await Promise.all([
       fetchCuratorModerationQueue(),
       fetchCuratorCompanyVerifications(),
-      fetchCuratorAuditLogs(),
     ])
 
     moderationQueue.value = queue
     companyVerifications.value = verifications
-    auditLogs.value = logs
   } catch (error) {
     errorMessage.value = getApiErrorMessage(
       error,
@@ -155,7 +175,6 @@ onMounted(async () => {
           <strong>{{ queueSize }} задач в очереди</strong>
           <span>Проверка компаний</span>
           <span>Модерация возможностей</span>
-          <span>Аудит действий</span>
         </div>
       </div>
 
@@ -192,28 +211,24 @@ onMounted(async () => {
             :key="item.id"
             class="queue-card"
           >
+            <div v-if="getCompanyVerificationRoute(item)" class="queue-card-topline">
+              <span class="queue-badge">Компания</span>
+              <RouterLink
+                :to="getCompanyVerificationRoute(item) || '/dashboard/curator'"
+                class="queue-action primary"
+              >
+                Перейти к компании
+              </RouterLink>
+            </div>
             <strong>{{ getQueueTitle(item) }}</strong>
             <span>Статус: {{ item.status || 'pending' }}</span>
             <span>Тип: {{ getQueueType(item) }}</span>
+            <span v-if="'company_name' in item && item.company_name">Компания: {{ item.company_name }}</span>
             <p>{{ getQueueDetails(item) }}</p>
           </div>
         </div>
       </section>
 
-      <section class="dashboard-section">
-        <h2>Аудит действий</h2>
-        <div class="queue-list">
-          <div v-if="!auditLogs.length" class="queue-card">
-            <strong>Логи пока не получены</strong>
-            <span>Эта секция подключена к `GET /api/curator/audit-logs`.</span>
-          </div>
-          <div v-for="log in auditLogs" :key="log.id" class="queue-card">
-            <strong>{{ log.action || 'curator action' }}</strong>
-            <span>Сущность: {{ log.entity_type || 'unknown' }}</span>
-            <p>{{ log.created_at || 'Время не указано' }}</p>
-          </div>
-        </div>
-      </section>
     </section>
   </main>
 </template>
@@ -256,6 +271,45 @@ onMounted(async () => {
   border: 1px solid #e4eaf1;
   border-radius: 10px;
   background: var(--surface-strong);
+}
+
+.queue-action {
+  display: inline-flex;
+  justify-self: start;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #d1dae5;
+  border-radius: 999px;
+  color: var(--accent-strong);
+  background: var(--surface);
+  text-decoration: none;
+  font-size: 0.88rem;
+}
+
+.queue-card-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.queue-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(41, 82, 204, 0.1);
+  color: var(--accent-strong);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.queue-action.primary {
+  border-color: #2447b9;
+  color: #fff;
+  background: linear-gradient(135deg, #2952cc, #17338f);
 }
 
 .avatar-shell {
@@ -302,7 +356,6 @@ onMounted(async () => {
   margin: 0;
   color: var(--accent-strong);
   font: 700 0.72rem/1 var(--font-mono);
-  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 

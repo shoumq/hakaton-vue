@@ -108,7 +108,6 @@ async function handleLogin() {
   margin: 0;
   color: var(--accent-strong);
   font: 700 0.72rem/1 var(--font-mono);
-  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 

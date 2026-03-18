@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { useSession } from '@/features/session/model/session'
 import { CuratorDashboardPage } from '@/pages/dashboard-curator'
+import { CuratorCompanyDetailsPage } from '@/pages/curator-company-details'
 import { EmployerDashboardPage } from '@/pages/dashboard-employer'
 import { ApplicantDashboardPage } from '@/pages/dashboard-applicant'
 import { HomePage } from '@/pages/home'
@@ -48,6 +49,12 @@ const router = createRouter({
       path: '/dashboard/curator',
       name: 'dashboard-curator',
       component: CuratorDashboardPage,
+      meta: { requiresRole: 'curator' },
+    },
+    {
+      path: '/dashboard/curator/companies/:id',
+      name: 'curator-company-details',
+      component: CuratorCompanyDetailsPage,
       meta: { requiresRole: 'curator' },
     },
   ],

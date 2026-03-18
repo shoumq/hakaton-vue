@@ -1,22 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
 :root {
-  --bg: #f4f6f8;
+  --bg: #f4f7fb;
   --surface: #ffffff;
-  --surface-strong: #f8fafb;
-  --surface-muted: #eef2f6;
-  --text: #1d2939;
-  --muted: #667085;
-  --border: #d7dee7;
-  --border-strong: #c8d3df;
-  --accent: #0a66c2;
-  --accent-strong: #004182;
-  --accent-soft: #e8f1fb;
-  --success: #137333;
-  --danger: #b42318;
-  --shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  --surface-strong: #f8fafd;
+  --surface-muted: #eef3f8;
+  --text: #162033;
+  --muted: #5f6b7a;
+  --border: #d7e0ea;
+  --border-strong: #c8d4e0;
+  --accent: #2952cc;
+  --accent-strong: #1e3fa0;
+  --accent-soft: #e8eefc;
+  --success: #198754;
+  --danger: #c44536;
+  --warning: #c58a1c;
+  --shadow: 0 12px 32px rgba(22, 32, 51, 0.08);
   --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --font-sans: 'Segoe UI', Arial, sans-serif;
-  --font-heading: 'Segoe UI', Arial, sans-serif;
-  --font-mono: 'SFMono-Regular', Consolas, monospace;
+  --font-sans: 'Inter', 'Segoe UI', Arial, sans-serif;
+  --font-heading: 'Inter', 'Segoe UI', Arial, sans-serif;
+  --font-mono: 'Inter', 'Segoe UI', Arial, sans-serif;
   color: var(--text);
   background: var(--bg);
   font-family: var(--font-sans);
@@ -41,10 +44,16 @@ body,
 body {
   margin: 0;
   background: var(--bg);
+  color: var(--text);
 }
 
 a {
   color: inherit;
+}
+
+::selection {
+  background: rgba(41, 82, 204, 0.16);
+  color: var(--text);
 }
 
 img {
@@ -60,12 +69,36 @@ select {
   color: inherit;
 }
 
+button,
+a,
+input,
+textarea,
+select {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(41, 82, 204, 0.14);
+}
+
 code {
   font-family: var(--font-mono);
 }
 
 #app {
   min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(41, 82, 204, 0.05), transparent 28%),
+    linear-gradient(180deg, #f4f7fb 0%, #eef3f8 100%);
 }
 
 .page-shell {

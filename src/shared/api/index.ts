@@ -1,6 +1,6 @@
-import type { AxiosRequestConfig } from 'axios'
+import axios, { type AxiosRequestConfig } from 'axios'
 
-import type { Opportunity, OpportunityLocation } from '@/entities/opportunity/model/types'
+import type { Opportunity, OpportunityLocation, OpportunityType, WorkFormat } from '@/entities/opportunity/model/types'
 import type { PlatformUser, UserRole } from '@/entities/user/model/types'
 import { employmentTags, levelTags } from '@/shared/config/tags'
 
@@ -188,13 +188,32 @@ export interface EmployerCompanyDto {
 export interface VerificationDto {
   id: string
   company_id?: string
+  company_name?: string
   status?: string
-  verification_method?: string
+  verification_method?: VerificationMethod
   corporate_email?: string
   inn_submitted?: string
   documents_comment?: string
   submitted_at?: string
   reviewed_at?: string
+}
+
+export interface CompanyRegistryDto {
+  inn?: string
+  full_name?: string
+  short_name?: string
+  status?: string
+  address?: string
+  ogrn?: string
+  kpp?: string
+  registration_date?: string
+  okved?: string
+  management_name?: string
+  management_post?: string
+  email?: string
+  phone?: string
+  employee_count?: number
+  source?: string
 }
 
 export interface ModerationQueueItemDto {
@@ -237,28 +256,75 @@ export interface EmployerCompanyInput {
   email_domain?: string
 }
 
+export type VerificationMethod =
+  | 'corporate_email'
+  | 'inn_check'
+  | 'manual_documents'
+  | 'social_links_review'
+  | 'combined'
+
 export interface VerificationInput {
-  corporate_email: string
+  corporate_email?: string
   inn_submitted?: string
-  verification_method: string
+  verification_method: VerificationMethod
   documents_comment?: string
 }
 
-export interface OpportunityCreateInput {
+export interface VerificationReviewInput {
+  status: 'approved' | 'needs_revision'
+  comment?: string
+}
+
+interface OpportunityCreateBaseInput {
   title: string
   short_description: string
   full_description: string
-  opportunity_type: string
-  employment_type: string
-  work_format: string
+  opportunity_type: OpportunityType
+  work_format: WorkFormat
   location_id: string
+  application_deadline?: string
+  contacts_info?: string
+  external_url?: string
+  expires_at?: string
+  tag_ids?: string[]
+  status?: string
+}
+
+export interface InternshipOpportunityCreateInput extends OpportunityCreateBaseInput {
+  opportunity_type: 'internship'
+  vacancy_level?: string
+  employment_type?: string
   salary_min?: number
   salary_max?: number
   salary_currency?: string
   is_salary_visible?: boolean
-  tag_ids?: string[]
-  status?: string
 }
+
+export interface VacancyOpportunityCreateInput extends OpportunityCreateBaseInput {
+  opportunity_type: 'vacancy'
+  vacancy_level?: string
+  employment_type?: string
+  salary_min?: number
+  salary_max?: number
+  salary_currency?: string
+  is_salary_visible?: boolean
+}
+
+export interface MentorshipOpportunityCreateInput extends OpportunityCreateBaseInput {
+  opportunity_type: 'mentorship'
+}
+
+export interface EventOpportunityCreateInput extends OpportunityCreateBaseInput {
+  opportunity_type: 'event'
+  event_start_at?: string
+  event_end_at?: string
+}
+
+export type OpportunityCreateInput =
+  | InternshipOpportunityCreateInput
+  | VacancyOpportunityCreateInput
+  | MentorshipOpportunityCreateInput
+  | EventOpportunityCreateInput
 
 function unwrap<T>(payload: ApiEnvelope<T> | T): T {
   if (payload && typeof payload === 'object' && 'status' in payload && 'data' in payload) {
@@ -650,6 +716,105 @@ export async function fetchCuratorCompanyVerifications() {
   })
 
   return asArray<VerificationDto>(data)
+}
+
+export async function fetchCuratorCompanyById(id: string) {
+  return request<EmployerCompanyDto>({
+    method: 'get',
+    url: `/curator/companies/${id}`,
+  })
+}
+
+export async function fetchCompanyRegistryByInn(inn: string) {
+  const dadataToken = import.meta.env.VITE_DADATA_TOKEN
+  const dadataUrl =
+    import.meta.env.VITE_DADATA_PARTY_API_URL ??
+    'https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party'
+
+  if (!dadataToken) {
+    throw new Error('Не задан VITE_DADATA_TOKEN для проверки компании по ИНН через DaData.')
+  }
+
+  const response = await axios.post<{ suggestions?: Array<Record<string, unknown>> }>(
+    dadataUrl,
+    { query: inn },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Token ${dadataToken}`,
+      },
+    },
+  )
+
+  const suggestion = response.data?.suggestions?.[0] as
+    | {
+        value?: string
+        unrestricted_value?: string
+        data?: {
+          inn?: string
+          ogrn?: string
+          kpp?: string
+          employee_count?: number
+          okved?: string
+          emails?: Array<{ value?: string }>
+          phones?: Array<{ value?: string }>
+          state?: {
+            status?: string
+            registration_date?: number
+          }
+          name?: {
+            full_with_opf?: string
+            short_with_opf?: string
+          }
+          management?: {
+            name?: string
+            post?: string
+          }
+          address?: {
+            value?: string
+            unrestricted_value?: string
+          }
+        }
+      }
+    | undefined
+
+  if (!suggestion?.data) {
+    throw new Error('Внешний сервис не вернул данные организации по этому ИНН.')
+  }
+
+  const registry = suggestion.data
+
+  return {
+    inn: registry.inn,
+    full_name: registry.name?.full_with_opf || suggestion.unrestricted_value || suggestion.value,
+    short_name: registry.name?.short_with_opf || suggestion.value,
+    status: registry.state?.status,
+    address: registry.address?.unrestricted_value || registry.address?.value,
+    ogrn: registry.ogrn,
+    kpp: registry.kpp,
+    registration_date: registry.state?.registration_date
+      ? new Date(registry.state.registration_date).toISOString()
+      : undefined,
+    okved: registry.okved,
+    management_name: registry.management?.name,
+    management_post: registry.management?.post,
+    email: registry.emails?.[0]?.value,
+    phone: registry.phones?.[0]?.value,
+    employee_count: registry.employee_count,
+    source: 'DaData',
+  }
+}
+
+export async function reviewCuratorCompanyVerification(
+  id: string,
+  payload: VerificationReviewInput,
+) {
+  return request<VerificationDto>({
+    method: 'patch',
+    url: `/curator/company-verifications/${id}`,
+    data: payload,
+  })
 }
 
 export async function fetchCuratorAuditLogs() {

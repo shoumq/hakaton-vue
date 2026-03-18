@@ -3,7 +3,13 @@ import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { useSession } from '@/features/session/model/session'
-import { getApiErrorMessage, submitEmployerVerification, updateEmployerCompany } from '@/shared/api'
+import {
+  fetchCompanyRegistryByInn,
+  getApiErrorMessage,
+  submitEmployerVerification,
+  updateEmployerCompany,
+} from '@/shared/api'
+import type { VerificationInput } from '@/shared/api'
 
 const router = useRouter()
 const session = useSession()
@@ -14,21 +20,74 @@ const form = reactive({
   displayName: '',
   password: '',
   companyName: '',
-  corporateEmail: '',
   inn: '',
   website: '',
 })
 
 const errorMessage = ref('')
 const successMessage = ref('')
+const isInnLookupLoading = ref(false)
 
 const verificationSummary = computed(() => {
   if (form.role !== 'employer') {
     return 'Для соискателя регистрация ограничивается email, отображаемым именем и паролем.'
   }
 
-  return 'Для работодателя можно сразу сохранить данные компании и отправить заявку на верификацию.'
+  return 'Для работодателя компания создаётся сразу, а верификация отправляется только по ИНН.'
 })
+
+function buildVerificationPayload(): VerificationInput | null {
+  const inn = form.inn.trim()
+  const website = form.website.trim()
+
+  if (!inn) {
+    return null
+  }
+
+  return {
+    inn_submitted: inn,
+    verification_method: 'inn_check',
+    documents_comment: website ? `Website: ${website}` : undefined,
+  }
+}
+
+function normalizeWebsiteFromRegistryEmail(email: string | undefined) {
+  if (!email) {
+    return ''
+  }
+
+  const domain = email.split('@')[1]?.trim().toLowerCase()
+
+  if (!domain) {
+    return ''
+  }
+
+  return `https://${domain}`
+}
+
+async function autofillCompanyByInn() {
+  const inn = form.inn.trim()
+
+  if (!inn || form.role !== 'employer') {
+    return
+  }
+
+  isInnLookupLoading.value = true
+
+  try {
+    const registry = await fetchCompanyRegistryByInn(inn)
+
+    form.companyName = registry.short_name || registry.full_name || form.companyName
+
+    const websiteFromRegistry = normalizeWebsiteFromRegistryEmail(registry.email)
+
+    if (websiteFromRegistry) {
+      form.website = websiteFromRegistry
+    }
+  } finally {
+    isInnLookupLoading.value = false
+  }
+}
 
 async function handleRegister() {
   errorMessage.value = ''
@@ -49,27 +108,28 @@ async function handleRegister() {
 
   if (form.role === 'employer') {
     try {
+      await autofillCompanyByInn()
+
       await updateEmployerCompany({
         legal_name: form.companyName.trim() || form.displayName.trim(),
         brand_name: form.companyName.trim() || form.displayName.trim(),
         website_url: form.website.trim() || undefined,
         inn: form.inn.trim() || undefined,
-        email_domain: form.corporateEmail.includes('@') ? form.corporateEmail.split('@')[1] : undefined,
       })
 
-      if (form.corporateEmail.trim()) {
-        await submitEmployerVerification({
-          corporate_email: form.corporateEmail.trim(),
-          inn_submitted: form.inn.trim() || undefined,
-          verification_method: 'website',
-          documents_comment: `Website: ${form.website.trim() || 'not provided'}`,
-        })
+      const verificationPayload = buildVerificationPayload()
+
+      if (verificationPayload) {
+        await submitEmployerVerification(verificationPayload)
       }
 
       successMessage.value = 'Аккаунт и профиль компании созданы.'
     } catch (error) {
       successMessage.value = 'Аккаунт создан, но данные компании сохранились не полностью.'
-      errorMessage.value = getApiErrorMessage(error, 'Не удалось завершить настройку компании.')
+      errorMessage.value = getApiErrorMessage(
+        error,
+        'Не удалось завершить настройку компании или получить данные по ИНН.',
+      )
     }
 
     await router.push('/dashboard/employer')
@@ -96,7 +156,7 @@ async function handleRegister() {
           <h2>Как работает верификация компании</h2>
           <p>
             После регистрации фронтенд может сохранить карточку компании через `PUT /api/employer/company`
-            и сразу отправить документы в `POST /api/employer/company-verifications`.
+            и сразу отправить верификацию по ИНН в `POST /api/employer/company-verifications`.
           </p>
         </article>
       </div>
@@ -127,18 +187,8 @@ async function handleRegister() {
 
         <template v-if="form.role === 'employer'">
           <label class="field">
-            <span>Компания</span>
-            <input v-model="form.companyName" type="text" placeholder="Aurora Cloud" />
-          </label>
-
-          <label class="field">
-            <span>Корпоративная почта</span>
-            <input v-model="form.corporateEmail" type="email" placeholder="hr@company.com" />
-          </label>
-
-          <label class="field">
             <span>ИНН</span>
-            <input v-model="form.inn" type="text" placeholder="7701234567" />
+            <input v-model="form.inn" type="text" placeholder="7701234567" required />
           </label>
 
           <label class="field">
@@ -187,7 +237,6 @@ async function handleRegister() {
   margin: 0;
   color: var(--accent-strong);
   font: 700 0.72rem/1 var(--font-mono);
-  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
