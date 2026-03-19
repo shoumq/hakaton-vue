@@ -5,16 +5,25 @@ import type { Opportunity, OpportunityType, WorkFormat } from '@/entities/opport
 import OpportunityCard from '@/entities/opportunity/ui/OpportunityCard.vue'
 import { useSession } from '@/features/session/model/session'
 import {
+  createRecommendation,
   createEmployerOpportunity,
   fetchEmployerCompany,
+  fetchEmployerOpportunityApplications,
   fetchEmployerOpportunities,
   fetchPublicCatalog,
   getApiErrorMessage,
   submitEmployerVerification,
-  uploadMyAvatar,
-  updateEmployerCompany,
+  updateEmployerApplicationStatus,
 } from '@/shared/api'
-import type { BackendTag, EmployerCompanyDto, OpportunityCreateInput, VerificationInput } from '@/shared/api'
+import type {
+  BackendTag,
+  EmployerApplicationDto,
+  EmployerApplicationStatus,
+  EmployerCompanyDto,
+  OpportunityCreateInput,
+  VerificationInput,
+} from '@/shared/api'
+import { formatDate } from '@/shared/lib/formatters'
 
 interface OpportunityFormState {
   title: string
@@ -47,25 +56,30 @@ const employerProfile = ref<Record<string, unknown> | null>(null)
 const locations = ref<Array<{ id: string; display_text?: string }>>([])
 const tags = ref<BackendTag[]>([])
 const isLoading = ref(true)
-const isSavingCompany = ref(false)
 const isSubmittingVerification = ref(false)
 const isSubmittingOpportunity = ref(false)
+const isApplicationsLoading = ref(false)
+const selectedOpportunityId = ref('')
+const selectedOpportunityTitle = ref('')
+const opportunityApplications = ref<EmployerApplicationDto[]>([])
+const activeApplicationFilter = ref<'all' | EmployerApplicationStatus>('all')
+const updatingApplicationId = ref('')
+const inviteTargetApplicationId = ref('')
+const isSendingInvitation = ref(false)
+const applicationsError = ref('')
+const invitationError = ref('')
 const errorMessage = ref('')
 const infoMessage = ref('')
-const avatarError = ref('')
-
-const companyForm = reactive({
-  legalName: '',
-  brandName: '',
-  website: '',
-  industry: '',
-  foundedYear: '',
-  inn: '',
-})
 
 const verificationForm = reactive({
   inn: '',
   comment: '',
+})
+
+const inviteForm = reactive({
+  toUserId: '',
+  opportunityId: '',
+  message: '',
 })
 
 const opportunityForm = reactive<OpportunityFormState>({
@@ -143,6 +157,15 @@ const statusOptions = [
   { value: 'published', label: 'Опубликовать' },
 ]
 
+const applicationStatusOptions: Array<{ value: EmployerApplicationStatus; label: string }> = [
+  { value: 'submitted', label: 'Новые' },
+  { value: 'in_review', label: 'В работе' },
+  { value: 'accepted', label: 'Приняты' },
+  { value: 'rejected', label: 'Отклонены' },
+  { value: 'reserve', label: 'Резерв' },
+  { value: 'withdrawn', label: 'Отозваны' },
+]
+
 const companyStatusLabel = computed(() => {
   const status = company.value?.status ?? 'unknown'
 
@@ -185,6 +208,30 @@ const previewTagGroups = computed(() => [
   currentOpportunityTypeConfig.value.showVacancyFields ? opportunityForm.vacancyLevel : '',
   currentOpportunityTypeConfig.value.showVacancyFields ? employmentLabel.value : '',
 ].filter(Boolean))
+const filteredApplications = computed(() => {
+  if (activeApplicationFilter.value === 'all') {
+    return opportunityApplications.value
+  }
+
+  return opportunityApplications.value.filter((item) => item.status === activeApplicationFilter.value)
+})
+const applicationFilterChips = computed(() => [
+  { value: 'all' as const, label: 'Все', count: opportunityApplications.value.length },
+  ...applicationStatusOptions.map((option) => ({
+    value: option.value,
+    label: option.label,
+    count: opportunityApplications.value.filter((item) => item.status === option.value).length,
+  })),
+])
+
+const companyHighlights = computed(() => [
+  { label: 'Юридическое название', value: company.value?.legal_name || 'Не заполнено' },
+  { label: 'Бренд', value: company.value?.brand_name || 'Не заполнено' },
+  { label: 'Сайт', value: company.value?.website_url || 'Не заполнено' },
+  { label: 'Индустрия', value: company.value?.industry || 'Не заполнено' },
+  { label: 'Год основания', value: company.value?.founded_year ? String(company.value.founded_year) : 'Не заполнено' },
+  { label: 'ИНН', value: company.value?.inn || 'Не заполнено' },
+])
 
 const avatarFallback = computed(() => {
   const value =
@@ -223,6 +270,74 @@ function resetOpportunityForm() {
   opportunityForm.eventEndAt = ''
   opportunityForm.status = 'draft'
   opportunityForm.selectedTechnologyTagIds = []
+}
+
+function getApplicationStatusLabel(status?: EmployerApplicationStatus) {
+  return applicationStatusOptions.find((item) => item.value === status)?.label || status || 'Новые'
+}
+
+function getApplicationAvatar(application: EmployerApplicationDto) {
+  return application.student_avatar_url || application.avatar_url || ''
+}
+
+function getApplicationInitials(application: EmployerApplicationDto) {
+  const source = application.student_display_name || application.student_user_id || 'U'
+
+  return source
+    .split(' ')
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
+}
+
+async function loadApplications(opportunityId: string) {
+  isApplicationsLoading.value = true
+  applicationsError.value = ''
+
+  try {
+    opportunityApplications.value = await fetchEmployerOpportunityApplications(opportunityId)
+  } catch (error) {
+    applicationsError.value = getApiErrorMessage(error, 'Не удалось загрузить отклики.')
+    opportunityApplications.value = []
+  } finally {
+    isApplicationsLoading.value = false
+  }
+}
+
+async function openApplications(opportunity: Opportunity) {
+  selectedOpportunityId.value = opportunity.id
+  selectedOpportunityTitle.value = opportunity.title
+  activeApplicationFilter.value = 'all'
+  inviteTargetApplicationId.value = ''
+  invitationError.value = ''
+  inviteForm.toUserId = ''
+  inviteForm.opportunityId = opportunity.id
+  inviteForm.message = ''
+  await loadApplications(opportunity.id)
+}
+
+function closeApplications() {
+  selectedOpportunityId.value = ''
+  selectedOpportunityTitle.value = ''
+  opportunityApplications.value = []
+  activeApplicationFilter.value = 'all'
+  closeInviteForm()
+}
+
+function openInviteForm(application: EmployerApplicationDto) {
+  inviteTargetApplicationId.value = application.id
+  inviteForm.toUserId = application.student_user_id || ''
+  inviteForm.opportunityId = selectedOpportunityId.value
+  inviteForm.message = `Приглашаем вас рассмотреть нашу возможность «${selectedOpportunityTitle.value}».`
+  invitationError.value = ''
+}
+
+function closeInviteForm() {
+  inviteTargetApplicationId.value = ''
+  invitationError.value = ''
+  inviteForm.toUserId = ''
+  inviteForm.message = ''
 }
 
 function buildVerificationPayload(): VerificationInput {
@@ -323,31 +438,6 @@ function buildOpportunityPayload(): OpportunityCreateInput {
   }
 }
 
-async function handleAvatarChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-
-  if (!file) {
-    return
-  }
-
-  isSavingCompany.value = true
-  avatarError.value = ''
-
-  try {
-    const user = await uploadMyAvatar(file)
-    session.patchCurrentUser({
-      displayName: user.display_name || session.currentUser.value?.displayName || user.email,
-      avatarUrl: user.avatar_url,
-    })
-  } catch (error) {
-    avatarError.value = getApiErrorMessage(error, 'Не удалось загрузить аватар.')
-  } finally {
-    isSavingCompany.value = false
-    input.value = ''
-  }
-}
-
 async function loadDashboard() {
   const [companyResult, opportunitiesResult, catalogResult] = await Promise.allSettled([
     fetchEmployerCompany(),
@@ -381,39 +471,9 @@ async function loadDashboard() {
     tags.value = []
   }
 
-  companyForm.legalName = companyData.legal_name ?? ''
-  companyForm.brandName = companyData.brand_name ?? ''
-  companyForm.website = companyData.website_url ?? ''
-  companyForm.industry = companyData.industry ?? ''
-  companyForm.foundedYear = companyData.founded_year ? String(companyData.founded_year) : ''
-  companyForm.inn = companyData.inn ?? ''
-
   verificationForm.inn = companyData.inn ?? ''
 
   resetOpportunityForm()
-}
-
-async function handleSaveCompany() {
-  isSavingCompany.value = true
-  errorMessage.value = ''
-  infoMessage.value = ''
-
-  try {
-    company.value = await updateEmployerCompany({
-      legal_name: companyForm.legalName.trim() || undefined,
-      brand_name: companyForm.brandName.trim() || undefined,
-      website_url: companyForm.website.trim() || undefined,
-      industry: companyForm.industry.trim() || undefined,
-      founded_year: companyForm.foundedYear ? Number(companyForm.foundedYear) : undefined,
-      inn: companyForm.inn.trim() || undefined,
-    })
-    opportunityForm.companyName = company.value?.brand_name || company.value?.legal_name || ''
-    infoMessage.value = 'Профиль компании сохранен.'
-  } catch (error) {
-    errorMessage.value = getApiErrorMessage(error, 'Не удалось сохранить профиль компании.')
-  } finally {
-    isSavingCompany.value = false
-  }
 }
 
 async function handleSubmitVerification() {
@@ -446,6 +506,63 @@ async function handleCreateOpportunity() {
     errorMessage.value = getApiErrorMessage(error, 'Не удалось создать возможность.')
   } finally {
     isSubmittingOpportunity.value = false
+  }
+}
+
+async function handleApplicationStatusChange(
+  application: EmployerApplicationDto,
+  status: EmployerApplicationStatus,
+) {
+  updatingApplicationId.value = application.id
+  applicationsError.value = ''
+  infoMessage.value = ''
+  const previousStatus = application.status
+  application.status = status
+
+  try {
+    const updated = await updateEmployerApplicationStatus(application.id, { status })
+    const target = opportunityApplications.value.find((item) => item.id === application.id)
+
+    if (target) {
+      Object.assign(target, updated)
+    }
+
+    infoMessage.value = `Статус отклика изменен на «${getApplicationStatusLabel(status)}».`
+  } catch (error) {
+    application.status = previousStatus
+    applicationsError.value = getApiErrorMessage(error, 'Не удалось изменить статус отклика.')
+  } finally {
+    updatingApplicationId.value = ''
+  }
+}
+
+async function handleSendInvitation() {
+  invitationError.value = ''
+
+  if (!inviteForm.toUserId.trim()) {
+    invitationError.value = 'Для приглашения нужен идентификатор пользователя.'
+    return
+  }
+
+  if (!inviteForm.opportunityId.trim()) {
+    invitationError.value = 'Не выбрана возможность для приглашения.'
+    return
+  }
+
+  isSendingInvitation.value = true
+
+  try {
+    await createRecommendation({
+      to_user_id: inviteForm.toUserId.trim(),
+      opportunity_id: inviteForm.opportunityId.trim(),
+      message: inviteForm.message.trim() || undefined,
+    })
+    infoMessage.value = 'Приглашение отправлено.'
+    closeInviteForm()
+  } catch (error) {
+    invitationError.value = getApiErrorMessage(error, 'Не удалось отправить приглашение.')
+  } finally {
+    isSendingInvitation.value = false
   }
 }
 
@@ -501,14 +618,13 @@ watch(
             />
             <span v-else class="avatar-fallback">{{ avatarFallback }}</span>
           </div>
-          <label class="avatar-upload">
-            <input type="file" accept="image/*" @change="handleAvatarChange" />
-            {{ isSavingCompany ? 'Загрузка...' : 'Загрузить фото' }}
-          </label>
-          <span v-if="avatarError" class="upload-error">{{ avatarError }}</span>
           <strong>Статус: {{ companyStatusLabel }}</strong>
           <p>Владелец компании: {{ employerProfile?.is_company_owner ? 'да' : 'нет' }}</p>
           <p>Публикация возможностей: {{ employerProfile?.can_create_opportunities ? 'разрешена' : 'заблокирована до проверки' }}</p>
+          <div class="hero-side-actions">
+            <RouterLink to="/profile" class="ghost-button">Редактировать профиль</RouterLink>
+            <RouterLink to="/notifications" class="ghost-button">Уведомления</RouterLink>
+          </div>
         </div>
       </div>
 
@@ -520,38 +636,17 @@ watch(
         <article class="section-card">
           <div class="section-title">
             <h2>Профиль компании</h2>
-            <p>Основные данные бренда и реквизиты для публикации.</p>
+            <p>Редактирование компании вынесено на отдельную страницу, чтобы кабинет оставался короче и чище.</p>
           </div>
-          <form class="editor-grid" @submit.prevent="handleSaveCompany">
-            <label class="field">
-              <span>Юридическое название</span>
-              <input v-model="companyForm.legalName" type="text" />
-            </label>
-            <label class="field">
-              <span>Бренд</span>
-              <input v-model="companyForm.brandName" type="text" />
-            </label>
-            <label class="field">
-              <span>Сайт</span>
-              <input v-model="companyForm.website" type="url" />
-            </label>
-            <label class="field">
-              <span>Индустрия</span>
-              <input v-model="companyForm.industry" type="text" />
-            </label>
-            <label class="field">
-              <span>Год основания</span>
-              <input v-model="companyForm.foundedYear" type="number" min="1900" />
-            </label>
-            <label class="field">
-              <span>ИНН</span>
-              <input v-model="companyForm.inn" type="text" />
-            </label>
-
-            <button class="primary-button" type="submit" :disabled="isSavingCompany">
-              {{ isSavingCompany ? 'Сохраняем...' : 'Сохранить профиль' }}
-            </button>
-          </form>
+          <div class="editor-grid profile-summary-grid">
+            <div v-for="item in companyHighlights" :key="item.label" class="summary-card">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </div>
+          </div>
+          <div class="summary-actions">
+            <RouterLink to="/profile" class="primary-button">Открыть страницу профиля</RouterLink>
+          </div>
         </article>
 
         <article v-if="canShowVerificationSection" class="section-card">
@@ -869,18 +964,166 @@ watch(
       </section>
 
       <section class="dashboard-section">
-        <h2>Активные, закрытые и запланированные возможности</h2>
+        <div class="section-heading">
+          <div class="section-heading-copy">
+            <h2>Активные, закрытые и запланированные возможности</h2>
+            <p class="hero-copy">Открывайте отклики по каждой карточке, меняйте статусы и отправляйте приглашения кандидатам.</p>
+          </div>
+        </div>
         <p v-if="!employerOpportunities.length" class="hero-copy">
           У компании пока нет опубликованных карточек или API вернул пустой список.
         </p>
-        <div class="card-list">
-          <OpportunityCard
+        <div class="managed-opportunity-list">
+          <article
             v-for="opportunity in employerOpportunities"
             :key="opportunity.id"
-            :opportunity="opportunity"
-            compact
-          />
+            class="managed-opportunity-card"
+          >
+            <OpportunityCard :opportunity="opportunity" compact />
+            <div class="managed-opportunity-actions">
+              <button class="ghost-button" type="button" @click="openApplications(opportunity)">
+                {{ selectedOpportunityId === opportunity.id ? 'Обновить отклики' : 'Отклики' }}
+              </button>
+              <span class="managed-opportunity-meta">{{ opportunity.type }} • {{ opportunity.status }}</span>
+            </div>
+          </article>
         </div>
+
+        <article v-if="selectedOpportunityId" class="applications-panel">
+          <div class="applications-panel-head">
+            <div>
+              <p class="eyebrow">Applications</p>
+              <h3>{{ selectedOpportunityTitle }}</h3>
+              <p class="hero-copy">Просмотр откликов и приглашений по выбранной возможности.</p>
+            </div>
+            <button class="ghost-button" type="button" @click="closeApplications">Скрыть</button>
+          </div>
+
+          <div class="filter-row">
+            <button
+              v-for="chip in applicationFilterChips"
+              :key="chip.value"
+              type="button"
+              class="filter-chip"
+              :class="{ active: activeApplicationFilter === chip.value }"
+              @click="activeApplicationFilter = chip.value"
+            >
+              {{ chip.label }} · {{ chip.count }}
+            </button>
+          </div>
+
+          <p v-if="applicationsError" class="status-banner error">{{ applicationsError }}</p>
+          <p v-else-if="isApplicationsLoading" class="status-banner">Загружаем отклики...</p>
+          <p v-else-if="!filteredApplications.length" class="status-banner">Для этого фильтра откликов нет.</p>
+
+          <div v-else class="applications-list">
+            <article
+              v-for="application in filteredApplications"
+              :key="application.id"
+              class="application-card"
+            >
+              <div class="application-head">
+                <div class="application-user">
+                  <div class="application-avatar">
+                    <img
+                      v-if="getApplicationAvatar(application)"
+                      :src="getApplicationAvatar(application)"
+                      alt="Аватар студента"
+                      class="avatar-image"
+                    />
+                    <span v-else class="avatar-fallback">{{ getApplicationInitials(application) }}</span>
+                  </div>
+                  <div class="application-copy">
+                    <strong>{{ application.student_user_id || 'student_user_id не указан' }}</strong>
+                    <span>{{ application.resume_id ? `Резюме: ${application.resume_id}` : 'Резюме не приложено' }}</span>
+                  </div>
+                </div>
+                <span class="application-status" :class="`status-${application.status || 'submitted'}`">
+                  {{ getApplicationStatusLabel(application.status) }}
+                </span>
+              </div>
+
+              <div class="application-grid">
+                <div class="application-detail">
+                  <span>Сопроводительное письмо</span>
+                  <p>{{ application.cover_letter || 'Кандидат не добавил сопроводительное письмо.' }}</p>
+                </div>
+                <div class="application-detail">
+                  <span>Создан</span>
+                  <p>{{ application.created_at ? formatDate(application.created_at) : 'Дата не указана' }}</p>
+                </div>
+              </div>
+
+              <div class="application-actions">
+                <button
+                  class="ghost-button"
+                  type="button"
+                  :disabled="updatingApplicationId === application.id"
+                  @click="handleApplicationStatusChange(application, 'in_review')"
+                >
+                  Взять в работу
+                </button>
+                <button
+                  class="ghost-button"
+                  type="button"
+                  :disabled="updatingApplicationId === application.id"
+                  @click="handleApplicationStatusChange(application, 'accepted')"
+                >
+                  Принять
+                </button>
+                <button
+                  class="ghost-button"
+                  type="button"
+                  :disabled="updatingApplicationId === application.id"
+                  @click="handleApplicationStatusChange(application, 'rejected')"
+                >
+                  Отклонить
+                </button>
+                <button
+                  class="ghost-button"
+                  type="button"
+                  :disabled="updatingApplicationId === application.id"
+                  @click="handleApplicationStatusChange(application, 'reserve')"
+                >
+                  В резерв
+                </button>
+                <button class="primary-button" type="button" @click="openInviteForm(application)">
+                  Пригласить
+                </button>
+              </div>
+
+              <form
+                v-if="inviteTargetApplicationId === application.id"
+                class="invite-form"
+                @submit.prevent="handleSendInvitation"
+              >
+                <label class="field">
+                  <span>ID пользователя</span>
+                  <input v-model="inviteForm.toUserId" type="text" required />
+                </label>
+                <label class="field">
+                  <span>ID возможности</span>
+                  <input v-model="inviteForm.opportunityId" type="text" required />
+                </label>
+                <label class="field field-wide">
+                  <span>Сообщение</span>
+                  <textarea
+                    v-model="inviteForm.message"
+                    rows="3"
+                    placeholder="Приглашаем вас рассмотреть нашу вакансию"
+                  />
+                </label>
+                <p v-if="invitationError" class="inline-error">{{ invitationError }}</p>
+                <div class="invite-actions">
+                  <button class="primary-button" type="submit" :disabled="isSendingInvitation">
+                    {{ isSendingInvitation ? 'Отправляем...' : 'Отправить приглашение' }}
+                  </button>
+                  <button class="ghost-button" type="button" @click="closeInviteForm">Отмена</button>
+                </div>
+              </form>
+            </article>
+          </div>
+        </article>
       </section>
     </section>
   </main>
@@ -896,6 +1139,171 @@ watch(
   gap: 16px;
 }
 
+.managed-opportunity-list,
+.applications-list {
+  display: grid;
+  gap: 14px;
+}
+
+.managed-opportunity-card,
+.applications-panel,
+.application-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(18, 38, 63, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.managed-opportunity-actions,
+.applications-panel-head,
+.application-head,
+.application-actions,
+.invite-actions,
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.managed-opportunity-meta {
+  color: #627087;
+  font-size: 0.84rem;
+  text-transform: capitalize;
+}
+
+.filter-row {
+  justify-content: flex-start;
+}
+
+.filter-chip {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  background: #fff;
+  color: #4c5b70;
+  font: inherit;
+  cursor: pointer;
+}
+
+.filter-chip.active {
+  border-color: rgba(41, 82, 204, 0.3);
+  background: rgba(41, 82, 204, 0.08);
+  color: #17338f;
+}
+
+.application-user {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.application-avatar {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 50%;
+  background: #eef3f8;
+}
+
+.application-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.application-copy strong {
+  color: #162033;
+}
+
+.application-copy span,
+.application-detail span {
+  color: #627087;
+  font-size: 0.82rem;
+}
+
+.application-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #eef3f8;
+  color: #24456b;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.application-status.status-submitted {
+  background: #eef3f8;
+  color: #24456b;
+}
+
+.application-status.status-in_review {
+  background: #eef1ff;
+  color: #1e3fa0;
+}
+
+.application-status.status-accepted {
+  background: rgba(25, 135, 84, 0.12);
+  color: #198754;
+}
+
+.application-status.status-rejected {
+  background: rgba(196, 69, 54, 0.12);
+  color: #c44536;
+}
+
+.application-status.status-reserve {
+  background: rgba(197, 138, 28, 0.12);
+  color: #c58a1c;
+}
+
+.application-status.status-withdrawn {
+  background: rgba(95, 107, 122, 0.16);
+  color: #5f6b7a;
+}
+
+.application-grid,
+.invite-form {
+  display: grid;
+  gap: 12px;
+}
+
+.application-grid {
+  grid-template-columns: minmax(0, 1.3fr) minmax(180px, 0.7fr);
+}
+
+.application-detail {
+  display: grid;
+  gap: 6px;
+  padding: 12px 13px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  background: rgba(248, 250, 253, 0.92);
+}
+
+.application-detail p {
+  color: #162033;
+}
+
+.invite-form {
+  padding-top: 4px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.inline-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.88rem;
+}
+
 .dashboard {
   max-width: 1240px;
   margin: 0 auto;
@@ -906,7 +1314,7 @@ watch(
 .dashboard-section {
   padding: 24px;
   border: 1px solid rgba(18, 38, 63, 0.08);
-  border-radius: 24px;
+  border-radius: 18px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 251, 0.94));
   box-shadow: 0 22px 52px rgba(15, 23, 42, 0.06);
@@ -935,6 +1343,11 @@ watch(
   align-content: start;
 }
 
+.hero-side-actions {
+  display: grid;
+  gap: 10px;
+}
+
 .hero-metrics {
   display: flex;
   flex-wrap: wrap;
@@ -945,7 +1358,7 @@ watch(
   min-width: 180px;
   padding: 14px 16px;
   border: 1px solid rgba(18, 38, 63, 0.08);
-  border-radius: 18px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.84);
   backdrop-filter: blur(10px);
 }
@@ -993,7 +1406,7 @@ watch(
   gap: 6px;
   padding: 16px 18px;
   border: 1px solid rgba(18, 38, 63, 0.08);
-  border-radius: 18px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.72);
 }
 
@@ -1011,7 +1424,7 @@ watch(
   max-width: 360px;
   padding: 16px 18px;
   border: 1px solid rgba(18, 38, 63, 0.08);
-  border-radius: 18px;
+  border-radius: 14px;
   background: rgba(250, 251, 253, 0.92);
 }
 
@@ -1065,13 +1478,12 @@ h1 {
   margin: 0;
   padding: 14px 16px;
   border: 1px solid rgba(18, 38, 63, 0.08);
-  border-radius: 16px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.92);
   font-size: 0.9rem;
 }
 
-.status-banner.error,
-.upload-error {
+.status-banner.error {
   color: var(--danger);
 }
 
@@ -1083,7 +1495,7 @@ h1 {
   gap: 12px;
   padding: 18px;
   border: 1px solid rgba(18, 38, 63, 0.08);
-  border-radius: 20px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.78);
   backdrop-filter: blur(10px);
 }
@@ -1114,20 +1526,38 @@ h1 {
   color: var(--accent-strong);
 }
 
-.avatar-upload {
-  color: #2952cc;
-  font-size: 0.88rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.avatar-upload input {
-  display: none;
-}
-
 .editor-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.profile-summary-grid {
+  margin-top: 2px;
+}
+
+.summary-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.summary-card span {
+  color: #627087;
+  font-size: 0.8rem;
+}
+
+.summary-card strong {
+  color: #162033;
+  font-size: 0.94rem;
+  line-height: 1.35;
+}
+
+.summary-actions {
+  display: flex;
+  padding-top: 14px;
 }
 
 .opportunity-editor {
@@ -1147,7 +1577,7 @@ h1 {
   gap: 16px;
   padding: 20px;
   border: 1px solid rgba(18, 38, 63, 0.08);
-  border-radius: 22px;
+  border-radius: 16px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 249, 252, 0.92));
   box-shadow: 0 16px 36px rgba(15, 23, 42, 0.05);
@@ -1229,7 +1659,7 @@ h1 {
   min-height: 44px;
   padding: 11px 13px;
   border: 1px solid rgba(148, 163, 184, 0.3);
-  border-radius: 14px;
+  border-radius: 10px;
   font: inherit;
   font-size: 0.9rem;
   background: rgba(255, 255, 255, 0.96);
@@ -1291,7 +1721,7 @@ h1 {
 .ghost-button {
   min-height: 42px;
   padding: 0 16px;
-  border-radius: 999px;
+  border-radius: 10px;
   font-size: 0.9rem;
   transition:
     transform 140ms ease,
@@ -1407,6 +1837,7 @@ h1 {
   .opportunity-layout,
   .editor-grid,
   .preview-grid,
+  .application-grid,
   .list-editor-row,
   .custom-tag-editor {
     grid-template-columns: 1fr;

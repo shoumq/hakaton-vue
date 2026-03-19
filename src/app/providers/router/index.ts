@@ -1,13 +1,16 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { useSession } from '@/features/session/model/session'
+import { ChatsPage } from '@/pages/chats'
 import { CuratorDashboardPage } from '@/pages/dashboard-curator'
 import { CuratorCompanyDetailsPage } from '@/pages/curator-company-details'
 import { EmployerDashboardPage } from '@/pages/dashboard-employer'
 import { ApplicantDashboardPage } from '@/pages/dashboard-applicant'
 import { HomePage } from '@/pages/home'
 import { LoginPage } from '@/pages/login'
+import { NotificationsPage } from '@/pages/notifications'
 import { OpportunityDetailsPage } from '@/pages/opportunity-details'
+import { ProfileSettingsPage } from '@/pages/profile-settings'
 import { RegisterPage } from '@/pages/register'
 
 const router = createRouter({
@@ -32,6 +35,24 @@ const router = createRouter({
       path: '/opportunities/:id',
       name: 'opportunity-details',
       component: OpportunityDetailsPage,
+    },
+    {
+      path: '/profile',
+      name: 'profile-settings',
+      component: ProfileSettingsPage,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/notifications',
+      name: 'notifications',
+      component: NotificationsPage,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/chats/:id?',
+      name: 'chats',
+      component: ChatsPage,
+      meta: { requiresAuth: true },
     },
     {
       path: '/dashboard/applicant',
@@ -63,10 +84,11 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const session = useSession()
   const requiredRole = to.meta.requiresRole as string | undefined
+  const requiresAuth = Boolean(to.meta.requiresAuth) || Boolean(requiredRole)
 
   await session.restoreSession()
 
-  if (!requiredRole) {
+  if (!requiresAuth) {
     return true
   }
 
@@ -74,7 +96,7 @@ router.beforeEach(async (to) => {
     return '/login'
   }
 
-  if (session.role.value !== requiredRole) {
+  if (requiredRole && session.role.value !== requiredRole) {
     return '/'
   }
 

@@ -16,7 +16,6 @@ import {
   fetchResumes,
   fetchStudentProfile,
   getApiErrorMessage,
-  uploadMyAvatar,
 } from '@/shared/api'
 import type {
   ApplicationDto,
@@ -41,8 +40,6 @@ const notifications = ref<NotificationDto[]>([])
 const publicOpportunities = ref<Opportunity[]>([])
 const isLoading = ref(true)
 const errorMessage = ref('')
-const isUploadingAvatar = ref(false)
-const avatarError = ref('')
 
 const applicationCards = computed(() => {
   const opportunitiesById = Object.fromEntries(publicOpportunities.value.map((item) => [item.id, item]))
@@ -84,12 +81,16 @@ const profileSummary = computed(() => {
 const privacyLabel = computed(() => {
   const visibility = studentProfile.value?.profile_visibility ?? 'authorized_only'
 
-  if (visibility === 'public') {
-    return 'Публичный'
+  if (visibility === 'public_inside_platform' || visibility === 'public') {
+    return 'Публичный внутри платформы'
   }
 
   if (visibility === 'private') {
     return 'Приватный'
+  }
+
+  if (visibility === 'contacts_only') {
+    return 'Только контактам'
   }
 
   return 'Только авторизованные'
@@ -119,37 +120,21 @@ const profileFacts = computed(() => [
   { label: 'Уведомления', value: String(notifications.value.length) },
 ])
 
+const profileHighlights = computed(() => [
+  { label: 'Университет', value: studentProfile.value?.university_name || 'Не указано' },
+  { label: 'Факультет', value: studentProfile.value?.faculty || 'Не указано' },
+  { label: 'Специализация', value: studentProfile.value?.specialization || 'Не указано' },
+  { label: 'Telegram', value: studentProfile.value?.telegram || 'Не указан' },
+  { label: 'GitHub', value: studentProfile.value?.github_url || 'Не указан' },
+  { label: 'Сайт', value: studentProfile.value?.website_url || 'Не указан' },
+])
+
 const activityMetrics = computed(() => [
   { label: 'Отклики', value: String(applications.value.length) },
   { label: 'Избранное', value: String(favoriteOpportunities.value.length) },
   { label: 'Контакты', value: String(contacts.value.length) },
   { label: 'Запросы', value: String(contactRequests.value.length) },
 ])
-
-async function handleAvatarChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-
-  if (!file) {
-    return
-  }
-
-  isUploadingAvatar.value = true
-  avatarError.value = ''
-
-  try {
-    const user = await uploadMyAvatar(file)
-    session.patchCurrentUser({
-      displayName: user.display_name || session.currentUser.value?.displayName || user.email,
-      avatarUrl: user.avatar_url,
-    })
-  } catch (error) {
-    avatarError.value = getApiErrorMessage(error, 'Не удалось загрузить фото профиля.')
-  } finally {
-    isUploadingAvatar.value = false
-    input.value = ''
-  }
-}
 
 onMounted(async () => {
   isLoading.value = true
@@ -223,14 +208,10 @@ onMounted(async () => {
           </div>
 
           <div class="hero-actions">
-            <label class="secondary-button upload-button">
-              <input type="file" accept="image/*" @change="handleAvatarChange" />
-              {{ isUploadingAvatar ? 'Загрузка...' : 'Обновить фото' }}
-            </label>
+            <RouterLink to="/profile" class="secondary-button">Редактировать профиль</RouterLink>
+            <RouterLink to="/notifications" class="secondary-button">Уведомления</RouterLink>
             <RouterLink to="/" class="secondary-button">К поиску вакансий</RouterLink>
           </div>
-
-          <p v-if="avatarError" class="inline-error">{{ avatarError }}</p>
         </div>
 
         <aside class="hero-side">
@@ -263,28 +244,17 @@ onMounted(async () => {
             <div class="section-head">
               <div>
                 <p class="section-label">Профиль</p>
-                <h2>Резюме и позиционирование</h2>
+                <h2>Профиль и настройки</h2>
               </div>
+              <RouterLink to="/profile" class="secondary-button compact-button">Открыть страницу профиля</RouterLink>
             </div>
             <p class="section-copy">
-              {{ aboutText }}
+              Редактирование профиля, ссылки, приватность и фото вынесены на отдельную страницу, чтобы кабинет оставался компактным.
             </p>
             <div class="detail-grid">
-              <div class="detail-card">
-                <span>Университет</span>
-                <strong>{{ studentProfile?.university_name || 'Не указано' }}</strong>
-              </div>
-              <div class="detail-card">
-                <span>Специализация</span>
-                <strong>{{ studentProfile?.specialization || 'Не указано' }}</strong>
-              </div>
-              <div class="detail-card">
-                <span>Курс / год</span>
-                <strong>{{ studentProfile?.study_year || studentProfile?.graduation_year || 'Не указано' }}</strong>
-              </div>
-              <div class="detail-card">
-                <span>Видимость</span>
-                <strong>{{ privacyLabel }}</strong>
+              <div v-for="item in profileHighlights" :key="item.label" class="detail-card">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
               </div>
             </div>
           </article>
@@ -378,6 +348,7 @@ onMounted(async () => {
               <div class="mini-card">
                 <strong>Уведомления</strong>
                 <span>{{ notifications.length ? `${notifications.length} новых` : 'Новых нет' }}</span>
+                <RouterLink to="/notifications" class="mini-link">Открыть</RouterLink>
               </div>
             </div>
           </article>
@@ -400,7 +371,7 @@ onMounted(async () => {
 .metric-card,
 .status-banner {
   border: 1px solid #d7dee7;
-  border-radius: 14px;
+  border-radius: 12px;
   background: #fff;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
@@ -442,7 +413,7 @@ onMounted(async () => {
   height: 96px;
   overflow: hidden;
   border: 3px solid #fff;
-  border-radius: 16px;
+  border-radius: 12px;
   background: linear-gradient(180deg, #eff4f9, #dde7f2);
   box-shadow: 0 5px 14px rgba(15, 23, 42, 0.06);
 }
@@ -538,14 +509,14 @@ h2 {
   font-size: 0.88rem;
 }
 
-.upload-button input {
-  display: none;
+.mini-link {
+  color: #1d4f91;
+  font-size: 0.84rem;
+  text-decoration: none;
 }
 
-.inline-error {
-  margin: 0;
-  color: var(--danger);
-  font-size: 0.88rem;
+.compact-button {
+  white-space: nowrap;
 }
 
 .facts-list,
@@ -567,7 +538,7 @@ h2 {
   min-height: 72px;
   padding: 12px 14px;
   border: 1px solid #dfe7f0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
@@ -648,7 +619,7 @@ h2 {
   gap: 4px;
   padding: 11px 12px;
   border: 1px solid #e4eaf1;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #fafbfd;
 }
 
@@ -706,6 +677,10 @@ h2 {
 
 .status-banner.error {
   color: var(--danger);
+}
+
+.status-banner.success {
+  color: var(--success);
 }
 
 @media (max-width: 1100px) {

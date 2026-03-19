@@ -125,12 +125,38 @@ export interface StudentProfileDto {
   github_url?: string
   linkedin_url?: string
   website_url?: string
-  profile_visibility?: string
+  profile_visibility?: StudentProfileVisibility | 'public'
   show_resume?: boolean
   show_applications?: boolean
   show_career_interests?: boolean
   created_at?: string
   updated_at?: string
+}
+
+export type StudentProfileVisibility =
+  | 'private'
+  | 'contacts_only'
+  | 'authorized_only'
+  | 'public_inside_platform'
+
+export interface StudentProfileInput {
+  first_name?: string
+  last_name?: string
+  middle_name?: string
+  university_name?: string
+  faculty?: string
+  specialization?: string
+  study_year?: number
+  graduation_year?: number
+  about?: string
+  telegram?: string
+  github_url?: string
+  linkedin_url?: string
+  website_url?: string
+  profile_visibility?: StudentProfileVisibility
+  show_resume?: boolean
+  show_applications?: boolean
+  show_career_interests?: boolean
 }
 
 export interface ApplicationDto {
@@ -166,9 +192,50 @@ export interface ContactDto {
 
 export interface NotificationDto {
   id: string
+  type?: string
   title?: string
-  message?: string
+  body?: string
+  is_read?: boolean
+  related_entity_type?: string
+  related_entity_id?: string
+  opportunity_title?: string
+  company_legal_name?: string
+  employer_contacts?: string
+  employer_user_id?: string
   created_at?: string
+}
+
+export interface ChatConversationDto {
+  id: string
+  participant_user_id?: string
+  participant_name?: string
+  participant_avatar_url?: string
+  company_legal_name?: string
+  opportunity_id?: string
+  opportunity_title?: string
+  last_message?: string
+  last_message_at?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ChatCreateInput {
+  participant_user_id: string
+  opportunity_id?: string
+}
+
+export interface ChatMessageDto {
+  id: string
+  conversation_id?: string
+  sender_user_id?: string
+  sender_name?: string
+  sender_avatar_url?: string
+  body?: string
+  created_at?: string
+}
+
+export interface ChatMessageInput {
+  body: string
 }
 
 export interface EmployerCompanyDto {
@@ -183,6 +250,37 @@ export interface EmployerCompanyDto {
   status?: string
   inn?: string
   email_domain?: string
+}
+
+export type EmployerApplicationStatus =
+  | 'submitted'
+  | 'in_review'
+  | 'accepted'
+  | 'rejected'
+  | 'reserve'
+  | 'withdrawn'
+
+export interface EmployerApplicationDto {
+  id: string
+  student_user_id?: string
+  student_display_name?: string
+  student_avatar_url?: string
+  avatar_url?: string
+  resume_id?: string
+  cover_letter?: string
+  status?: EmployerApplicationStatus
+  created_at?: string
+  updated_at?: string
+}
+
+export interface EmployerApplicationStatusInput {
+  status: EmployerApplicationStatus
+}
+
+export interface RecommendationCreateInput {
+  to_user_id: string
+  opportunity_id: string
+  message?: string
 }
 
 export interface VerificationDto {
@@ -544,6 +642,14 @@ export async function fetchStudentProfile() {
   })
 }
 
+export async function updateStudentProfile(payload: StudentProfileInput) {
+  return request<StudentProfileDto>({
+    method: 'put',
+    url: '/me/student-profile',
+    data: payload,
+  })
+}
+
 export async function fetchOpportunityById(id: string) {
   const [opportunity, locations] = await Promise.all([
     request<BackendOpportunity>({
@@ -649,6 +755,40 @@ export async function fetchNotifications() {
   return asArray<NotificationDto>(data)
 }
 
+export async function fetchMyChats() {
+  const data = await request<ChatConversationDto[] | null>({
+    method: 'get',
+    url: '/me/chats',
+  })
+
+  return asArray<ChatConversationDto>(data)
+}
+
+export async function createMyChat(payload: ChatCreateInput) {
+  return request<ChatConversationDto>({
+    method: 'post',
+    url: '/me/chats',
+    data: payload,
+  })
+}
+
+export async function fetchChatMessages(chatId: string) {
+  const data = await request<ChatMessageDto[] | null>({
+    method: 'get',
+    url: `/me/chats/${chatId}/messages`,
+  })
+
+  return asArray<ChatMessageDto>(data)
+}
+
+export async function sendChatMessage(chatId: string, payload: ChatMessageInput) {
+  return request<ChatMessageDto>({
+    method: 'post',
+    url: `/me/chats/${chatId}/messages`,
+    data: payload,
+  })
+}
+
 export async function fetchEmployerCompany() {
   return request<EmployerCompanyDto>({
     method: 'get',
@@ -690,6 +830,34 @@ export async function fetchEmployerOpportunities() {
   const locationsById = createLocationMap(locations)
 
   return opportunities.map((item) => normalizeOpportunity(item, locationsById))
+}
+
+export async function fetchEmployerOpportunityApplications(opportunityId: string) {
+  const data = await request<EmployerApplicationDto[]>({
+    method: 'get',
+    url: `/employer/opportunities/${opportunityId}/applications`,
+  })
+
+  return asArray<EmployerApplicationDto>(data)
+}
+
+export async function updateEmployerApplicationStatus(
+  applicationId: string,
+  payload: EmployerApplicationStatusInput,
+) {
+  return request<EmployerApplicationDto>({
+    method: 'patch',
+    url: `/employer/applications/${applicationId}/status`,
+    data: payload,
+  })
+}
+
+export async function createRecommendation(payload: RecommendationCreateInput) {
+  return request<Record<string, unknown>>({
+    method: 'post',
+    url: '/me/recommendations',
+    data: payload,
+  })
 }
 
 export async function createEmployerOpportunity(payload: OpportunityCreateInput) {
