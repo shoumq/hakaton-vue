@@ -281,20 +281,6 @@ p {
   border-radius: 8px;
 }
 
-.primary-button {
-  min-height: 40px;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  color: #fff;
-  background: var(--accent);
-  font-size: 0.92rem;
-}
-
-.primary-button:disabled {
-  opacity: 0.65;
-  cursor: progress;
-}
-
 .error-text {
   margin: 0;
   color: var(--danger);

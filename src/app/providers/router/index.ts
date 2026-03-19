@@ -11,6 +11,8 @@ import { LoginPage } from '@/pages/login'
 import { NotificationsPage } from '@/pages/notifications'
 import { OpportunityDetailsPage } from '@/pages/opportunity-details'
 import { ProfileSettingsPage } from '@/pages/profile-settings'
+import { PublicCompanyProfilePage } from '@/pages/public-company-profile'
+import { PublicStudentProfilePage } from '@/pages/public-student-profile'
 import { RegisterPage } from '@/pages/register'
 
 const router = createRouter({
@@ -40,6 +42,18 @@ const router = createRouter({
       path: '/profile',
       name: 'profile-settings',
       component: ProfileSettingsPage,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/profiles/students/:id',
+      name: 'public-student-profile',
+      component: PublicStudentProfilePage,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/profiles/companies/:id',
+      name: 'public-company-profile',
+      component: PublicCompanyProfilePage,
       meta: { requiresAuth: true },
     },
     {

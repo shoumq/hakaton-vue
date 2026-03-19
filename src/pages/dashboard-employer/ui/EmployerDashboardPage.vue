@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 
 import type { Opportunity, OpportunityType, WorkFormat } from '@/entities/opportunity/model/types'
 import OpportunityCard from '@/entities/opportunity/ui/OpportunityCard.vue'
 import { useSession } from '@/features/session/model/session'
 import {
   createRecommendation,
+  createMyChat,
   createEmployerOpportunity,
   fetchEmployerCompany,
   fetchEmployerOpportunityApplications,
@@ -24,6 +26,7 @@ import type {
   VerificationInput,
 } from '@/shared/api'
 import { formatDate } from '@/shared/lib/formatters'
+import { saveStudentProfilePreview } from '@/shared/lib/profile-preview'
 
 interface OpportunityFormState {
   title: string
@@ -50,6 +53,7 @@ interface OpportunityFormState {
 }
 
 const session = useSession()
+const router = useRouter()
 const employerOpportunities = ref<Opportunity[]>([])
 const company = ref<EmployerCompanyDto | null>(null)
 const employerProfile = ref<Record<string, unknown> | null>(null)
@@ -65,6 +69,7 @@ const opportunityApplications = ref<EmployerApplicationDto[]>([])
 const activeApplicationFilter = ref<'all' | EmployerApplicationStatus>('all')
 const updatingApplicationId = ref('')
 const inviteTargetApplicationId = ref('')
+const openingChatApplicationId = ref('')
 const isSendingInvitation = ref(false)
 const applicationsError = ref('')
 const invitationError = ref('')
@@ -340,6 +345,23 @@ function closeInviteForm() {
   inviteForm.message = ''
 }
 
+function saveApplicantPreview(application: EmployerApplicationDto) {
+  if (!application.student_user_id) {
+    return
+  }
+
+  saveStudentProfilePreview({
+    id: application.student_user_id,
+    displayName: application.student_display_name || application.student_user_id,
+    avatarUrl: getApplicationAvatar(application),
+    headline: application.resume_id ? `Резюме: ${application.resume_id}` : 'Соискатель',
+    resumeId: application.resume_id,
+    coverLetter: application.cover_letter,
+    updatedAt: application.updated_at || application.created_at,
+    sourceOpportunityTitle: selectedOpportunityTitle.value,
+  })
+}
+
 function buildVerificationPayload(): VerificationInput {
   const inn = verificationForm.inn.trim()
   const comment = verificationForm.comment.trim()
@@ -566,6 +588,29 @@ async function handleSendInvitation() {
   }
 }
 
+async function handleOpenApplicantChat(application: EmployerApplicationDto) {
+  if (!application.student_user_id) {
+    applicationsError.value = 'Невозможно открыть чат: у отклика нет student_user_id.'
+    return
+  }
+
+  openingChatApplicationId.value = application.id
+  applicationsError.value = ''
+
+  try {
+    const chat = await createMyChat({
+      participant_user_id: application.student_user_id,
+      opportunity_id: selectedOpportunityId.value || undefined,
+    })
+
+    await router.push(`/chats/${chat.id}`)
+  } catch (error) {
+    applicationsError.value = getApiErrorMessage(error, 'Не удалось открыть чат с соискателем.')
+  } finally {
+    openingChatApplicationId.value = ''
+  }
+}
+
 onMounted(async () => {
   isLoading.value = true
   errorMessage.value = ''
@@ -611,16 +656,14 @@ watch(
         <div class="verification-card">
           <div class="avatar-shell large">
             <img
-              v-if="session.currentUser.value?.avatarUrl"
-              :src="session.currentUser.value.avatarUrl"
-              alt="Аватар пользователя"
+              v-if="company?.avatar_url"
+              :src="company.avatar_url"
+              alt="Аватар компании"
               class="avatar-image"
             />
             <span v-else class="avatar-fallback">{{ avatarFallback }}</span>
           </div>
           <strong>Статус: {{ companyStatusLabel }}</strong>
-          <p>Владелец компании: {{ employerProfile?.is_company_owner ? 'да' : 'нет' }}</p>
-          <p>Публикация возможностей: {{ employerProfile?.can_create_opportunities ? 'разрешена' : 'заблокирована до проверки' }}</p>
           <div class="hero-side-actions">
             <RouterLink to="/profile" class="ghost-button">Редактировать профиль</RouterLink>
             <RouterLink to="/notifications" class="ghost-button">Уведомления</RouterLink>
@@ -684,16 +727,6 @@ watch(
               Форма покрывает публикацию вакансии, стажировки, менторской программы или карьерного мероприятия.
             </p>
           </div>
-          <div class="opportunity-highlights">
-            <div class="highlight-pill">
-              <strong>Структурированная форма</strong>
-              <span>Основное, даты, контакты и теги разбиты на логичные группы.</span>
-            </div>
-            <div class="highlight-pill">
-              <strong>Стартовый каталог тегов</strong>
-              <span>Популярные технологии и уровни уже доступны, дополнительные теги можно добавить вручную.</span>
-            </div>
-          </div>
         </div>
 
         <div class="opportunity-layout">
@@ -704,7 +737,6 @@ watch(
                   <p class="form-card-eyebrow">Основа</p>
                   <h3>Главная информация</h3>
                 </div>
-                <span class="form-card-note">Что это за возможность и кому она подходит</span>
               </div>
               <div class="editor-grid">
                 <label class="field">
@@ -1055,6 +1087,22 @@ watch(
               </div>
 
               <div class="application-actions">
+                <button
+                  class="primary-button"
+                  type="button"
+                  :disabled="openingChatApplicationId === application.id || !application.student_user_id"
+                  @click="handleOpenApplicantChat(application)"
+                >
+                  {{ openingChatApplicationId === application.id ? 'Открываем чат...' : 'Открыть чат' }}
+                </button>
+                <RouterLink
+                  v-if="application.student_user_id"
+                  :to="`/profiles/students/${application.student_user_id}`"
+                  class="ghost-button"
+                  @click="saveApplicantPreview(application)"
+                >
+                  Профиль кандидата
+                </RouterLink>
                 <button
                   class="ghost-button"
                   type="button"
@@ -1560,6 +1608,11 @@ h1 {
   padding-top: 14px;
 }
 
+.hero-side-actions {
+  display: grid;
+  gap: 10px;
+}
+
 .opportunity-editor {
   display: grid;
   gap: 18px;
@@ -1717,48 +1770,8 @@ h1 {
   grid-template-columns: 180px minmax(0, 1fr) auto;
 }
 
-.primary-button,
-.ghost-button {
-  min-height: 42px;
-  padding: 0 16px;
-  border-radius: 10px;
-  font-size: 0.9rem;
-  transition:
-    transform 140ms ease,
-    box-shadow 140ms ease,
-    border-color 140ms ease,
-    background 140ms ease;
-}
-
-.primary-button {
-  border: 1px solid #2447b9;
-  color: #fff;
-  background: linear-gradient(135deg, #2952cc, #17338f);
-  box-shadow: 0 14px 28px rgba(41, 82, 204, 0.22);
-}
-
-.ghost-button {
-  border: 1px solid rgba(148, 163, 184, 0.26);
-  color: #2952cc;
-  background: rgba(255, 255, 255, 0.94);
-}
-
-.primary-button:hover,
-.ghost-button:hover {
-  transform: translateY(-1px);
-}
-
-.ghost-button:hover {
-  border-color: rgba(41, 82, 204, 0.28);
-}
-
 .align-start {
   justify-self: start;
-}
-
-.primary-button:disabled {
-  opacity: 0.65;
-  cursor: progress;
 }
 
 .preview-card {

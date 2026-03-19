@@ -138,7 +138,6 @@ p {
   border-radius: 8px;
 }
 
-.primary-button,
 .secondary-link {
   display: inline-flex;
   align-items: center;
@@ -147,17 +146,6 @@ p {
   border-radius: 8px;
   text-decoration: none;
   font-size: 0.92rem;
-}
-
-.primary-button {
-  border: 1px solid var(--accent);
-  color: #fff;
-  background: var(--accent);
-}
-
-.primary-button:disabled {
-  opacity: 0.65;
-  cursor: progress;
 }
 
 .secondary-link {

@@ -56,6 +56,7 @@ interface BackendLocation {
 interface BackendOpportunity {
   id: string
   company_id?: string
+  company_avatar_url?: string
   title: string
   short_description?: string
   full_description?: string
@@ -242,6 +243,8 @@ export interface EmployerCompanyDto {
   id: string
   legal_name?: string
   brand_name?: string
+  avatar_url?: string
+  avatar_object?: string
   description?: string
   industry?: string
   website_url?: string
@@ -523,6 +526,7 @@ function normalizeOpportunity(
     summary: opportunity.short_description || opportunity.full_description || 'Описание появится позже.',
     companyId: opportunity.company_id ?? '',
     companyName: opportunity.company_name ?? 'Компания',
+    companyAvatarUrl: opportunity.company_avatar_url,
     companyDescription: '',
     companyWebsite: '',
     type: (opportunity.opportunity_type as Opportunity['type']) || 'vacancy',
@@ -613,6 +617,20 @@ export async function uploadMyAvatar(file: File) {
   })
 
   return data
+}
+
+export async function uploadEmployerCompanyAvatar(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  return request<EmployerCompanyDto>({
+    method: 'put',
+    url: '/employer/company/avatar',
+    data: formData,
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
 }
 
 export async function fetchPublicCatalog(): Promise<PublicCatalog> {
@@ -793,6 +811,13 @@ export async function fetchEmployerCompany() {
   return request<EmployerCompanyDto>({
     method: 'get',
     url: '/employer/company',
+  })
+}
+
+export async function fetchCompanyById(id: string) {
+  return request<EmployerCompanyDto>({
+    method: 'get',
+    url: `/companies/${id}`,
   })
 }
 

@@ -42,3 +42,46 @@ export function pluralize(count: number, one: string, few: string, many: string)
 
   return many
 }
+
+const opportunityTypeLabels: Record<string, string> = {
+  vacancy: 'Вакансия',
+  internship: 'Стажировка',
+  mentorship: 'Менторство',
+  event: 'Событие',
+}
+
+const workFormatLabels: Record<string, string> = {
+  remote: 'Удаленно',
+  hybrid: 'Гибрид',
+  office: 'В офисе',
+}
+
+const employmentLabels: Record<string, string> = {
+  'full-time': 'Полная занятость',
+  'part-time': 'Частичная занятость',
+  project: 'Проектная работа',
+}
+
+export function formatOpportunityType(value?: string) {
+  if (!value) {
+    return 'Не указано'
+  }
+
+  return opportunityTypeLabels[value] ?? value
+}
+
+export function formatWorkFormat(value?: string) {
+  if (!value) {
+    return 'Не указано'
+  }
+
+  return workFormatLabels[value] ?? value
+}
+
+export function formatEmployment(value?: string) {
+  if (!value) {
+    return 'Не указано'
+  }
+
+  return employmentLabels[value] ?? value
+}

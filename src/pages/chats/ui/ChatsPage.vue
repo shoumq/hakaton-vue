@@ -12,6 +12,7 @@ import {
 import type { ChatConversationDto, ChatMessageDto } from '@/shared/api'
 import { ChatSocketClient } from '@/shared/lib/chat'
 import { formatDate } from '@/shared/lib/formatters'
+import { saveCompanyProfilePreview, saveStudentProfilePreview } from '@/shared/lib/profile-preview'
 
 type SocketState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected'
 
@@ -41,20 +42,16 @@ const selectedChatId = computed(() => {
 
 const selectedChat = computed(() => chats.value.find((item) => item.id === selectedChatId.value) || null)
 const currentUserId = computed(() => session.currentUser.value?.id || '')
-const socketStatusLabel = computed(() => {
-  if (socketState.value === 'connected') {
-    return 'online'
+const selectedChatProfileLink = computed(() => {
+  const chat = selectedChat.value
+
+  if (!chat?.participant_user_id) {
+    return ''
   }
 
-  if (socketState.value === 'connecting') {
-    return 'connecting'
-  }
-
-  if (socketState.value === 'reconnecting') {
-    return 'reconnecting'
-  }
-
-  return 'disconnected'
+  return session.role.value === 'employer'
+    ? `/profiles/students/${chat.participant_user_id}`
+    : `/profiles/companies/${chat.participant_user_id}`
 })
 
 function sortAndDedupeMessages(list: ChatMessageDto[]) {
@@ -137,6 +134,31 @@ function connectSocket(chatId: string) {
   chatClient.value.connect()
 }
 
+function saveSelectedChatProfilePreview() {
+  const chat = selectedChat.value
+
+  if (!chat?.participant_user_id) {
+    return
+  }
+
+  if (session.role.value === 'employer') {
+    saveStudentProfilePreview({
+      id: chat.participant_user_id,
+      displayName: chat.participant_name || 'Кандидат',
+      avatarUrl: chat.participant_avatar_url,
+      sourceOpportunityTitle: chat.opportunity_title,
+    })
+    return
+  }
+
+  saveCompanyProfilePreview({
+    id: chat.participant_user_id,
+    companyName: chat.company_legal_name || chat.participant_name || 'Компания',
+    avatarUrl: chat.participant_avatar_url,
+    sourceOpportunityTitle: chat.opportunity_title,
+  })
+}
+
 async function handleSendMessage() {
   sendingError.value = ''
   const body = messageForm.body.trim()
@@ -193,17 +215,6 @@ onBeforeUnmount(() => {
 <template>
   <main class="page-shell">
     <section class="chats-page">
-      <header class="chats-hero">
-        <div>
-          <p class="eyebrow">Chats</p>
-          <h1>Чаты с работодателями</h1>
-          <p class="hero-copy">Обсуждайте приглашения и возможности напрямую. История грузится по HTTP, новые сообщения прилетают через WebSocket.</p>
-        </div>
-        <div class="hero-actions">
-          <RouterLink to="/notifications" class="secondary-button">Уведомления</RouterLink>
-          <RouterLink to="/" class="secondary-button">На главную</RouterLink>
-        </div>
-      </header>
 
       <div class="chat-layout">
         <aside class="chat-sidebar">
@@ -255,7 +266,14 @@ onBeforeUnmount(() => {
                 <h2>{{ selectedChat.participant_name || selectedChat.company_legal_name || 'Чат' }}</h2>
                 <p class="hero-copy">{{ selectedChat.opportunity_title || 'Без привязки к возможности' }}</p>
               </div>
-              <span class="socket-state" :class="socketStatusLabel">{{ socketStatusLabel }}</span>
+              <RouterLink
+                v-if="selectedChatProfileLink"
+                :to="selectedChatProfileLink"
+                class="ghost-button"
+                @click="saveSelectedChatProfilePreview"
+              >
+                {{ session.role.value === 'employer' ? 'Профиль кандидата' : 'Профиль компании' }}
+              </RouterLink>
             </div>
 
             <p v-if="messagesError" class="panel-status error">{{ messagesError }}</p>
@@ -535,7 +553,6 @@ h2 {
   font: inherit;
 }
 
-.primary-button,
 .secondary-button {
   display: inline-flex;
   align-items: center;
@@ -545,12 +562,6 @@ h2 {
   border-radius: 8px;
   text-decoration: none;
   font: inherit;
-}
-
-.primary-button {
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: #fff;
 }
 
 .secondary-button {

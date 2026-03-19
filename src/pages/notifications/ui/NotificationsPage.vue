@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
+import { useSession } from '@/features/session/model/session'
 import {
   fetchNotifications,
   fetchOpportunityById,
@@ -27,6 +28,11 @@ const startingChatId = ref('')
 const errorMessage = ref('')
 const activeFilter = ref<NotificationFilter>('all')
 const router = useRouter()
+const session = useSession()
+const currentUserId = computed(() => session.currentUser.value?.id || '')
+const chatButtonLabel = computed(() =>
+  session.role.value === 'employer' ? 'Написать кандидату' : 'Написать работодателю',
+)
 
 const invitationNotifications = computed(() =>
   notifications.value.filter((item) => item.type === 'recommendation_received'),
@@ -119,7 +125,20 @@ function getNotificationBody(notification: NotificationDto) {
   return notification.body || 'Текст уведомления отсутствует.'
 }
 
+function canStartChat(notification: NotificationDto) {
+  return Boolean(
+    notification.employer_user_id &&
+      currentUserId.value &&
+      notification.employer_user_id !== currentUserId.value,
+  )
+}
+
 async function handleStartChat(notification: NotificationDto) {
+  if (!canStartChat(notification)) {
+    errorMessage.value = 'Нельзя открыть чат с самим собой.'
+    return
+  }
+
   startingChatId.value = notification.id
   errorMessage.value = ''
 
@@ -206,13 +225,13 @@ onMounted(loadNotifications)
               Открыть возможность
             </RouterLink>
             <button
-              v-if="notification.employer_user_id"
+              v-if="canStartChat(notification)"
               type="button"
               class="primary-button"
               :disabled="startingChatId === notification.id"
               @click="handleStartChat(notification)"
             >
-              {{ startingChatId === notification.id ? 'Открываем чат...' : 'Написать работодателю' }}
+              {{ startingChatId === notification.id ? 'Открываем чат...' : chatButtonLabel }}
             </button>
           </div>
         </article>
@@ -363,7 +382,6 @@ h2 {
 }
 
 .filter-button,
-.primary-button,
 .secondary-button {
   display: inline-flex;
   align-items: center;
@@ -387,12 +405,6 @@ h2 {
   border-color: rgba(41, 82, 204, 0.28);
   background: rgba(41, 82, 204, 0.08);
   color: #1e3fa0;
-}
-
-.primary-button {
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: #fff;
 }
 
 .notification-card,

@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
     <div class="brand-block">
       <RouterLink class="brand-link" to="/">
         <span class="brand-dot"></span>
-        Career Atlas
+        Трамплин
       </RouterLink>
       <p class="brand-copy">Вакансии, стажировки, менторство и карьерные события на одной карте.</p>
     </div>
@@ -124,7 +124,9 @@ onBeforeUnmount(() => {
       <RouterLink to="/" class="nav-link">Главная</RouterLink>
       <div v-if="session.isAuthenticated.value" class="notifications-menu-shell">
         <button class="nav-link icon-button" type="button" @click.stop="toggleNotifications">
-          <span class="bell-icon" aria-hidden="true">◔</span>
+          <svg class="bell-icon" aria-hidden="true" viewBox="0 0 24 24">
+            <use href="/icons.svg#bell-icon" />
+          </svg>
           <span v-if="unreadCount" class="notification-badge">{{ unreadCount }}</span>
         </button>
 
@@ -216,6 +218,13 @@ onBeforeUnmount(() => {
   margin: 0;
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.bell-icon {
+  width: 18px;
+  height: 18px;
+  color: currentColor;
+  flex: 0 0 auto;
 }
 
 .header-nav {

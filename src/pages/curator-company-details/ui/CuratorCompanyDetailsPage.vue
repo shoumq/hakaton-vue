@@ -491,7 +491,6 @@ h1 {
   color: #0f7b49;
 }
 
-.primary-button,
 .ghost-link {
   display: inline-flex;
   align-items: center;
@@ -501,18 +500,6 @@ h1 {
   border-radius: 999px;
   text-decoration: none;
   font-size: 0.92rem;
-}
-
-.primary-button {
-  border: 1px solid #2447b9;
-  color: #fff;
-  background: linear-gradient(135deg, #2952cc, #17338f);
-  box-shadow: 0 14px 28px rgba(41, 82, 204, 0.22);
-}
-
-.primary-button:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 .ghost-link {

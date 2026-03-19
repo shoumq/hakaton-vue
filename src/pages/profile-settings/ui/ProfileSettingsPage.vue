@@ -9,6 +9,7 @@ import {
   getApiErrorMessage,
   updateEmployerCompany,
   updateStudentProfile,
+  uploadEmployerCompanyAvatar,
   uploadMyAvatar,
 } from '@/shared/api'
 import type {
@@ -138,6 +139,14 @@ const avatarFallback = computed(() => {
     .toUpperCase()
 })
 
+const currentAvatarUrl = computed(() => {
+  if (isEmployer.value) {
+    return companyProfile.value?.avatar_url || ''
+  }
+
+  return session.currentUser.value?.avatarUrl || ''
+})
+
 function syncStudentForm(profile: StudentProfileDto | null) {
   const normalizedVisibility =
     profile?.profile_visibility === 'public' ? 'public_inside_platform' : profile?.profile_visibility
@@ -231,6 +240,12 @@ async function handleAvatarChange(event: Event) {
   avatarError.value = ''
 
   try {
+    if (isEmployer.value) {
+      companyProfile.value = await uploadEmployerCompanyAvatar(file)
+      syncCompanyForm(companyProfile.value)
+      return
+    }
+
     const user = await uploadMyAvatar(file)
     session.patchCurrentUser({
       displayName: user.display_name || session.currentUser.value?.displayName || user.email,
@@ -329,8 +344,8 @@ onMounted(loadPage)
         <aside class="avatar-panel">
           <div class="avatar-shell">
             <img
-              v-if="session.currentUser.value?.avatarUrl"
-              :src="session.currentUser.value.avatarUrl"
+              v-if="currentAvatarUrl"
+              :src="currentAvatarUrl"
               alt="Аватар"
               class="avatar-image"
             />
@@ -663,7 +678,6 @@ h1 {
   padding-top: 6px;
 }
 
-.primary-button,
 .secondary-button {
   display: inline-flex;
   align-items: center;
@@ -675,22 +689,11 @@ h1 {
   font-size: 0.9rem;
 }
 
-.primary-button {
-  border: 1px solid var(--accent);
-  color: #fff;
-  background: var(--accent);
-}
-
 .secondary-button {
   border: 1px solid var(--border);
   color: var(--accent-strong);
   background: var(--surface);
   cursor: pointer;
-}
-
-.primary-button:disabled {
-  opacity: 0.65;
-  cursor: progress;
 }
 
 .status-banner {

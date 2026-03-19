@@ -29,6 +29,7 @@ export interface Opportunity {
   summary: string
   companyId: string
   companyName: string
+  companyAvatarUrl?: string
   companyDescription: string
   companyWebsite: string
   type: OpportunityType

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { useSession } from '@/features/session/model/session'
 import MapLibreOpportunityMap from '@/shared/ui/MapLibreOpportunityMap.vue'
@@ -11,7 +11,14 @@ import {
   getApiErrorMessage,
 } from '@/shared/api'
 import type { OpportunityDetails, ResumeDto } from '@/shared/api'
-import { formatDate, formatMoneyRange } from '@/shared/lib/formatters'
+import {
+  formatDate,
+  formatEmployment,
+  formatMoneyRange,
+  formatOpportunityType,
+  formatWorkFormat,
+} from '@/shared/lib/formatters'
+import { saveCompanyProfilePreview } from '@/shared/lib/profile-preview'
 
 const route = useRoute()
 const router = useRouter()
@@ -87,6 +94,22 @@ onMounted(async () => {
   await session.restoreSession()
   await loadPage()
 })
+
+function saveCompanyPreview() {
+  if (!opportunity.value?.companyId) {
+    return
+  }
+
+  saveCompanyProfilePreview({
+    id: opportunity.value.companyId,
+    companyName: opportunity.value.companyName,
+    avatarUrl: opportunity.value.companyAvatarUrl,
+    description: opportunity.value.companyDescription,
+    website: opportunity.value.companyWebsite,
+    contacts: opportunity.value.contacts,
+    sourceOpportunityTitle: opportunity.value.title,
+  })
+}
 </script>
 
 <template>
@@ -102,12 +125,12 @@ onMounted(async () => {
             <p class="section-label">Возможность</p>
             <h1>{{ opportunity.title }}</h1>
             <p class="hero-company">{{ opportunity.companyName }}</p>
-            <p class="hero-copy">{{ opportunity.fullDescription }}</p>
+            <p class="hero-copy">{{ opportunity.summary }}</p>
 
             <div class="hero-tags">
-              <span class="pill">{{ opportunity.type }}</span>
-              <span class="pill">{{ opportunity.workFormat }}</span>
-              <span class="pill">{{ opportunity.employment }}</span>
+              <span class="pill">{{ formatOpportunityType(opportunity.type) }}</span>
+              <span class="pill">{{ formatWorkFormat(opportunity.workFormat) }}</span>
+              <span class="pill">{{ formatEmployment(opportunity.employment) }}</span>
               <span v-for="tag in opportunity.technologies" :key="tag" class="tag">{{ tag }}</span>
               <span v-for="level in opportunity.levels" :key="level" class="tag muted">{{ level }}</span>
             </div>
@@ -125,10 +148,6 @@ onMounted(async () => {
             <div class="summary-card">
               <span>Дедлайн</span>
               <strong>{{ formatDate(opportunity.expiresAt) }}</strong>
-            </div>
-            <div class="summary-card">
-              <span>Отклики / просмотры</span>
-              <strong>{{ opportunity.applicationsCount }} / {{ opportunity.viewsCount }}</strong>
             </div>
           </aside>
         </header>
@@ -179,12 +198,20 @@ onMounted(async () => {
                 </div>
                 <div class="mini-card">
                   <strong>Формат</strong>
-                  <span>{{ opportunity.workFormat }}</span>
+                  <span>{{ formatWorkFormat(opportunity.workFormat) }}</span>
                 </div>
                 <div class="mini-card">
                   <strong>Тип</strong>
-                  <span>{{ opportunity.type }}</span>
+                  <span>{{ formatOpportunityType(opportunity.type) }}</span>
                 </div>
+                <RouterLink
+                  v-if="opportunity.companyId"
+                  :to="`/profiles/companies/${opportunity.companyId}`"
+                  class="ghost-button company-link"
+                  @click="saveCompanyPreview"
+                >
+                  Профиль компании
+                </RouterLink>
               </div>
             </article>
 
@@ -274,8 +301,9 @@ onMounted(async () => {
 
 .hero-side {
   display: grid;
-  gap: 10px;
-  padding: 20px 18px;
+  gap: 8px;
+  align-content: start;
+  padding: 12px;
   border-left: 1px solid #e3e8ef;
   background: linear-gradient(180deg, #fbfcfd 0%, #f6f9fc 100%);
 }
@@ -346,8 +374,8 @@ h2 {
 
 .summary-card {
   display: grid;
-  gap: 4px;
-  padding: 12px 14px;
+  gap: 2px;
+  padding: 10px 12px;
   border: 1px solid #dfe7f0;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.92);
@@ -374,32 +402,40 @@ h2 {
 }
 
 .section-card.compact {
-  padding: 14px;
+  padding: 10px;
 }
 
 .section-head {
   margin-bottom: 10px;
 }
 
+.section-card.compact .section-head {
+  margin-bottom: 6px;
+}
+
 .section-head > div {
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 
 .location-card,
 .mini-card {
   display: grid;
-  gap: 4px;
-  padding: 11px 12px;
+  gap: 2px;
+  padding: 8px 9px;
   border: 1px solid #e4eaf1;
   border-radius: 10px;
   background: #fafbfd;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .apply-form {
   display: grid;
   gap: 10px;
+}
+
+.company-link {
+  width: 100%;
 }
 
 .field {
@@ -419,16 +455,6 @@ h2 {
   border: 1px solid #d7dee7;
   border-radius: 8px;
   font: inherit;
-  font-size: 0.9rem;
-}
-
-.primary-button {
-  min-height: 38px;
-  padding: 0 14px;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  color: #fff;
-  background: var(--accent);
   font-size: 0.9rem;
 }
 
