@@ -90,7 +90,14 @@ export function useSession() {
 
       setSession(payload.user, payload.token, payload.expiresAt)
 
-      return { ok: true as const, user: payload.user }
+      try {
+        const currentUser = await fetchCurrentUser()
+        state.currentUser = getPlatformUserFromCurrentUser(currentUser)
+      } catch {
+        // Keep the auth payload as a fallback if /me is temporarily unavailable.
+      }
+
+      return { ok: true as const, user: state.currentUser ?? payload.user }
     } catch (error) {
       return {
         ok: false as const,
@@ -115,7 +122,14 @@ export function useSession() {
       const result = await registerRequest(payload)
       setSession(result.user, result.token, result.expiresAt)
 
-      return { ok: true as const, user: result.user }
+      try {
+        const currentUser = await fetchCurrentUser()
+        state.currentUser = getPlatformUserFromCurrentUser(currentUser)
+      } catch {
+        // Registration still succeeds even if the immediate /me sync fails.
+      }
+
+      return { ok: true as const, user: state.currentUser ?? result.user }
     } catch (error) {
       return {
         ok: false as const,

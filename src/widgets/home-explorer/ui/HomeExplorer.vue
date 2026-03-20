@@ -8,7 +8,7 @@ import { useFavorites } from '@/features/favorites/model/favorites'
 import { useOpportunityFilters } from '@/features/opportunity-filter/model/useOpportunityFilters'
 import { fetchPublicCatalog, getApiErrorMessage } from '@/shared/api'
 import { opportunityTypes, technologyTags, workFormats } from '@/shared/config/tags'
-import { formatEmployment, formatOpportunityType, formatWorkFormat, pluralize } from '@/shared/lib/formatters'
+import { formatEmployment, formatMoneyRange, formatOpportunityType, formatWorkFormat, pluralize } from '@/shared/lib/formatters'
 import MapLibreOpportunityCollectionMap from '@/shared/ui/MapLibreOpportunityCollectionMap.vue'
 
 const router = useRouter()
@@ -259,8 +259,8 @@ onMounted(async () => {
               <div class="feed-item-main">
                 <div class="feed-item-topline">
                   <div class="badge-row">
-                    <span class="pill">{{ formatOpportunityType(opportunity.type) + " | "}} </span>
-                    <span class="pill muted">{{ formatWorkFormat(opportunity.workFormat) + " | "}}</span>
+                    <span class="pill">{{ formatOpportunityType(opportunity.type) + " • "}} </span>
+                    <span class="pill muted">{{ formatWorkFormat(opportunity.workFormat) + " • "}}</span>
                     <span class="pill subtle">{{ formatEmployment(opportunity.employment) }}</span>
                   </div>
                 </div>
@@ -277,8 +277,8 @@ onMounted(async () => {
 
                 <div class="feed-meta">
                   <span>{{ opportunity.location.placementLabel }}</span>
-                  <span>{{ opportunity.salaryFrom || opportunity.salaryTo ? 'Доход указан' : 'Доход не указан' }}</span>
-                  <span>{{ opportunity.technologies.slice(0, 3).join(' • ') || 'Теги появятся позже' }}</span>
+                  <span>{{ formatMoneyRange(opportunity.salaryFrom, opportunity.salaryTo) }}</span>
+                  <span>{{ [...opportunity.technologies, ...opportunity.levels].slice(0, 4).join(' • ') || 'Теги появятся позже' }}</span>
                 </div>
 
                 <div class="feed-actions">

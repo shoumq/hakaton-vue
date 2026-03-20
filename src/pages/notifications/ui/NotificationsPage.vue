@@ -114,6 +114,10 @@ async function loadNotifications() {
 }
 
 function getNotificationTitle(notification: NotificationDto) {
+  if (notification.title === 'Статус отклика') {
+    return ''
+  }
+
   if (notification.type === 'recommendation_received') {
     return notification.title || 'Вас пригласили'
   }
@@ -200,22 +204,13 @@ onMounted(loadNotifications)
         >
           <div class="notification-head">
             <div>
-              <p class="notification-type">
-                {{ notification.type === 'recommendation_received' ? 'Приглашение' : notification.type || 'Системное уведомление' }}
-              </p>
-              <h2>{{ getNotificationTitle(notification) }}</h2>
+              <h2 v-if="getNotificationTitle(notification)">{{ getNotificationTitle(notification) }}</h2>
             </div>
             <span class="notification-date">
               {{ notification.created_at ? formatDate(notification.created_at) : 'Дата не указана' }}
             </span>
           </div>
           <p class="notification-body">{{ getNotificationBody(notification) }}</p>
-          <div class="notification-meta">
-            <span>{{ notification.is_read ? 'Прочитано' : 'Не прочитано' }}</span>
-            <span v-if="notification.related_entity_type && notification.related_entity_id">
-              {{ notification.related_entity_type }}: {{ notification.related_entity_id }}
-            </span>
-          </div>
           <div class="card-actions">
             <RouterLink
               v-if="notification.related_entity_type === 'opportunity' && notification.related_entity_id"
@@ -275,10 +270,6 @@ onMounted(loadNotifications)
             <div class="invitation-detail">
               <span>Контакты работодателя</span>
               <strong>{{ card.notification.employer_contacts || 'Не указаны' }}</strong>
-            </div>
-            <div class="invitation-detail">
-              <span>Статус уведомления</span>
-              <strong>{{ card.notification.is_read ? 'Прочитано' : 'Не прочитано' }}</strong>
             </div>
           </div>
 

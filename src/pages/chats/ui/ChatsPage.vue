@@ -45,14 +45,42 @@ const currentUserId = computed(() => session.currentUser.value?.id || '')
 const selectedChatProfileLink = computed(() => {
   const chat = selectedChat.value
 
-  if (!chat?.participant_user_id) {
-    return ''
+  if (session.role.value === 'employer') {
+    return chat?.participant_user_id ? `/profiles/students/${chat.participant_user_id}` : ''
   }
 
-  return session.role.value === 'employer'
-    ? `/profiles/students/${chat.participant_user_id}`
-    : `/profiles/companies/${chat.participant_user_id}`
+  const companyId = chat?.company_id || chat?.participant_user_id
+  return companyId ? `/profiles/companies/${companyId}` : ''
 })
+
+function saveChatProfilePreview(chat: ChatConversationDto | null) {
+  if (session.role.value === 'employer') {
+    if (!chat?.participant_user_id) {
+      return
+    }
+
+    saveStudentProfilePreview({
+      id: chat.participant_user_id,
+      displayName: chat.participant_name || 'Кандидат',
+      avatarUrl: chat.participant_avatar_url,
+      sourceOpportunityTitle: chat.opportunity_title,
+    })
+    return
+  }
+
+  const companyId = chat?.company_id || chat?.participant_user_id
+
+  if (!companyId) {
+    return
+  }
+
+  saveCompanyProfilePreview({
+    id: companyId,
+    companyName: chat.company_legal_name || chat.participant_name || 'Компания',
+    avatarUrl: chat.participant_avatar_url,
+    sourceOpportunityTitle: chat.opportunity_title,
+  })
+}
 
 function sortAndDedupeMessages(list: ChatMessageDto[]) {
   const byId = new Map<string, ChatMessageDto>()
@@ -72,6 +100,7 @@ async function loadChats() {
 
   try {
     chats.value = await fetchMyChats()
+    chats.value.forEach((chat) => saveChatProfilePreview(chat))
 
     if (!selectedChatId.value && chats.value[0]?.id) {
       await router.replace(`/chats/${chats.value[0].id}`)
@@ -135,28 +164,7 @@ function connectSocket(chatId: string) {
 }
 
 function saveSelectedChatProfilePreview() {
-  const chat = selectedChat.value
-
-  if (!chat?.participant_user_id) {
-    return
-  }
-
-  if (session.role.value === 'employer') {
-    saveStudentProfilePreview({
-      id: chat.participant_user_id,
-      displayName: chat.participant_name || 'Кандидат',
-      avatarUrl: chat.participant_avatar_url,
-      sourceOpportunityTitle: chat.opportunity_title,
-    })
-    return
-  }
-
-  saveCompanyProfilePreview({
-    id: chat.participant_user_id,
-    companyName: chat.company_legal_name || chat.participant_name || 'Компания',
-    avatarUrl: chat.participant_avatar_url,
-    sourceOpportunityTitle: chat.opportunity_title,
-  })
+  saveChatProfilePreview(selectedChat.value)
 }
 
 async function handleSendMessage() {

@@ -7,7 +7,6 @@ import { useSession } from '@/features/session/model/session'
 const router = useRouter()
 const session = useSession()
 
-const authMode = ref<'student' | 'employer' | 'curator'>('student')
 const email = ref('')
 const password = ref('')
 const errorMessage = ref('')
@@ -25,11 +24,11 @@ function resolveRoute(role: string) {
 }
 
 async function handleLogin() {
-  const result = await session.login(
-    email.value,
-    password.value,
-    authMode.value === 'curator' ? 'curator' : 'user',
-  )
+  let result = await session.login(email.value, password.value, 'user')
+
+  if (!result.ok) {
+    result = await session.login(email.value, password.value, 'curator')
+  }
 
   if (!result.ok) {
     errorMessage.value = result.message
@@ -46,23 +45,14 @@ async function handleLogin() {
     <section class="auth-layout">
       <div class="auth-copy">
         <p class="eyebrow">Авторизация</p>
-        <h1>Вход в платформу для соискателей, работодателей и кураторов.</h1>
+        <h1>Вход в платформу.</h1>
         <p>
-          Для соискателей и работодателей используется `POST /api/auth/login`, для кураторов
-          отдельная ручка `POST /api/auth/curator/login`.
+          Используйте email и пароль. Если учётная запись относится к куратору, вход будет
+          автоматически выполнен через отдельный curator endpoint.
         </p>
       </div>
 
       <form class="auth-card" @submit.prevent="handleLogin">
-        <label class="field">
-          <span>Сценарий входа</span>
-          <select v-model="authMode">
-            <option value="student">Соискатель</option>
-            <option value="employer">Работодатель</option>
-            <option value="curator">Куратор</option>
-          </select>
-        </label>
-
         <label class="field">
           <span>Email</span>
           <input v-model="email" type="email" required />
@@ -130,8 +120,7 @@ p {
   gap: 8px;
 }
 
-.field input,
-.field select {
+.field input {
   min-height: 42px;
   padding: 0 12px;
   border: 1px solid #d7dee7;

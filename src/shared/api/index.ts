@@ -141,6 +141,7 @@ export type StudentProfileVisibility =
   | 'public_inside_platform'
 
 export interface StudentProfileInput {
+  display_name?: string
   first_name?: string
   last_name?: string
   middle_name?: string
@@ -208,6 +209,7 @@ export interface NotificationDto {
 
 export interface ChatConversationDto {
   id: string
+  company_id?: string
   participant_user_id?: string
   participant_name?: string
   participant_avatar_url?: string
@@ -657,6 +659,13 @@ export async function fetchStudentProfile() {
   return request<StudentProfileDto>({
     method: 'get',
     url: '/me/student-profile',
+  })
+}
+
+export async function fetchStudentById(id: string) {
+  return request<StudentProfileDto>({
+    method: 'get',
+    url: `/students/${id}`,
   })
 }
 

@@ -24,13 +24,13 @@ const companyHighlights = computed(() => {
 
   return [
     { label: 'Компания', value: company.value?.brand_name || company.value?.legal_name || preview.value?.companyName || 'Не указана' },
-    { label: 'ID компании', value: company.value?.id || preview.value?.id || 'Не указан' },
     { label: 'Сайт', value: company.value?.website_url || preview.value?.website || 'Не указан' },
     { label: 'Индустрия', value: company.value?.industry || preview.value?.industry || 'Не указана' },
     { label: 'Контакты', value: preview.value?.contacts?.length ? preview.value.contacts.join(', ') : 'Не указаны' },
-    { label: 'Связано с возможностью', value: preview.value?.sourceOpportunityTitle || 'Не указано' },
   ]
 })
+
+const visibleProfileError = computed(() => (preview.value ? '' : profileError.value))
 
 const initials = computed(() =>
   (company.value?.brand_name || company.value?.legal_name || preview.value?.companyName || 'CO')
@@ -118,7 +118,7 @@ onMounted(async () => {
         </div>
 
         <section class="dashboard-grid single-column">
-          <p v-if="profileError" class="section-copy error-copy">{{ profileError }}</p>
+          <p v-if="visibleProfileError" class="section-copy error-copy">{{ visibleProfileError }}</p>
           <article class="section-card">
             <div class="section-title">
               <h2>Профиль компании</h2>
