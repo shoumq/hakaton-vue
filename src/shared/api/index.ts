@@ -134,6 +134,15 @@ export interface StudentProfileDto {
   updated_at?: string
 }
 
+export interface PublicStudentProfileDto extends StudentProfileDto {
+  avatar_url?: string
+  resume_count?: number
+  portfolio_count?: number
+  has_resume?: boolean
+  has_portfolio?: boolean
+  contact_relation?: 'none' | 'contact' | 'incoming_pending' | 'outgoing_pending'
+}
+
 export type StudentProfileVisibility =
   | 'private'
   | 'contacts_only'
@@ -237,14 +246,18 @@ export interface NotificationDto {
 export interface ChatConversationDto {
   id: string
   company_id?: string
+  participant_role?: 'student' | 'employer' | 'curator'
   participant_user_id?: string
   participant_name?: string
   participant_avatar_url?: string
+  participant_is_online?: boolean
+  participant_last_seen_at?: string
   company_legal_name?: string
   opportunity_id?: string
   opportunity_title?: string
   last_message?: string
   last_message_at?: string
+  unread_count?: number
   created_at?: string
   updated_at?: string
 }
@@ -269,7 +282,10 @@ export interface ChatMessageDto {
   sender_user_id?: string
   sender_name?: string
   sender_avatar_url?: string
+  sender_is_online?: boolean
   body?: string
+  is_read?: boolean
+  read_at?: string
   created_at?: string
 }
 
@@ -481,6 +497,28 @@ async function request<T>(config: AxiosRequestConfig) {
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
+}
+
+function pickArray<T>(value: unknown, keys: string[]): T[] {
+  if (Array.isArray(value)) {
+    return value as T[]
+  }
+
+  if (!value || typeof value !== 'object') {
+    return []
+  }
+
+  const record = value as Record<string, unknown>
+
+  for (const key of keys) {
+    const nested = record[key]
+
+    if (Array.isArray(nested)) {
+      return nested as T[]
+    }
+  }
+
+  return []
 }
 
 function normalizeRole(role: string | undefined): AuthRole {
@@ -705,6 +743,32 @@ export async function fetchStudentById(id: string) {
   })
 }
 
+export async function fetchStudents(params?: {
+  search?: string
+  university_name?: string
+  faculty?: string
+  specialization?: string
+  study_year?: number | null
+}) {
+  const query = Object.fromEntries(
+    Object.entries({
+      search: params?.search?.trim() || undefined,
+      university_name: params?.university_name?.trim() || undefined,
+      faculty: params?.faculty?.trim() || undefined,
+      specialization: params?.specialization?.trim() || undefined,
+      study_year: params?.study_year ?? undefined,
+    }).filter(([, value]) => value !== undefined && value !== ''),
+  )
+
+  const data = await request<PublicStudentProfileDto[] | null>({
+    method: 'get',
+    url: '/students',
+    params: query,
+  })
+
+  return pickArray<PublicStudentProfileDto>(data, ['students', 'items', 'results', 'profiles'])
+}
+
 export async function updateStudentProfile(payload: StudentProfileInput) {
   return request<StudentProfileDto>({
     method: 'put',
@@ -868,6 +932,13 @@ export async function sendChatMessage(chatId: string, payload: ChatMessageInput)
     method: 'post',
     url: `/me/chats/${chatId}/messages`,
     data: payload,
+  })
+}
+
+export async function markChatAsRead(chatId: string) {
+  return request<void>({
+    method: 'post',
+    url: `/me/chats/${chatId}/read`,
   })
 }
 

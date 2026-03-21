@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
+import LucideSendHorizontal from '~icons/lucide/send-horizontal'
 
 import { useSession } from '@/features/session/model/session'
 import {
   fetchChatMessages,
   fetchMyChats,
   getApiErrorMessage,
+  markChatAsRead,
   sendChatMessage,
 } from '@/shared/api'
 import type { ChatConversationDto, ChatMessageDto } from '@/shared/api'
@@ -30,6 +32,7 @@ const sendingError = ref('')
 const isSending = ref(false)
 const socketState = ref<SocketState>('idle')
 const chatClient = ref<ChatSocketClient | null>(null)
+const markingReadIds = ref<Record<string, boolean>>({})
 
 const messageForm = reactive({
   body: '',
@@ -42,10 +45,55 @@ const selectedChatId = computed(() => {
 
 const selectedChat = computed(() => chats.value.find((item) => item.id === selectedChatId.value) || null)
 const currentUserId = computed(() => session.currentUser.value?.id || '')
+
+function isEmployerChat(chat: ChatConversationDto | null) {
+  return Boolean(chat && (chat.participant_role === 'employer' || chat.company_id))
+}
+
+function getChatTitle(chat: ChatConversationDto | null) {
+  if (!chat) {
+    return 'Чат'
+  }
+
+  if (isEmployerChat(chat)) {
+    return chat.participant_name || chat.company_legal_name || 'Компания'
+  }
+
+  return chat.opportunity_title || chat.participant_name || 'Чат'
+}
+
+function getChatSubtitle(chat: ChatConversationDto | null) {
+  if (!chat) {
+    return ''
+  }
+
+  if (isEmployerChat(chat)) {
+    return chat.opportunity_title || 'Вакансия не указана'
+  }
+
+  return chat.participant_name || 'Собеседник'
+}
+
+function getSelectedChatHeaderSubtitle(chat: ChatConversationDto | null) {
+  if (!chat) {
+    return ''
+  }
+
+  if (isEmployerChat(chat)) {
+    return chat.opportunity_title || ''
+  }
+
+  return ''
+}
+
 const selectedChatProfileLink = computed(() => {
   const chat = selectedChat.value
 
-  if (session.role.value === 'employer') {
+  if (!chat) {
+    return ''
+  }
+
+  if (!isEmployerChat(chat)) {
     return chat?.participant_user_id ? `/profiles/students/${chat.participant_user_id}` : ''
   }
 
@@ -53,8 +101,16 @@ const selectedChatProfileLink = computed(() => {
   return companyId ? `/profiles/companies/${companyId}` : ''
 })
 
+const selectedChatProfileLabel = computed(() => {
+  return isEmployerChat(selectedChat.value) ? 'Профиль компании' : 'Профиль соискателя'
+})
+
 function saveChatProfilePreview(chat: ChatConversationDto | null) {
-  if (session.role.value === 'employer') {
+  if (!chat) {
+    return
+  }
+
+  if (!isEmployerChat(chat)) {
     if (!chat?.participant_user_id) {
       return
     }
@@ -94,6 +150,48 @@ function sortAndDedupeMessages(list: ChatMessageDto[]) {
   })
 }
 
+function patchChat(chatId: string, patch: Partial<ChatConversationDto>) {
+  chats.value = chats.value.map((item) => (item.id === chatId ? { ...item, ...patch } : item))
+}
+
+function markMessagesAsReadLocally(chatId: string) {
+  const now = new Date().toISOString()
+
+  messages.value = messages.value.map((item) => {
+    if (item.conversation_id !== chatId && item.conversation_id) {
+      return item
+    }
+
+    if (item.sender_user_id === currentUserId.value || item.is_read) {
+      return item
+    }
+
+    return {
+      ...item,
+      is_read: true,
+      read_at: item.read_at || now,
+    }
+  })
+}
+
+async function syncChatReadState(chatId: string) {
+  if (!chatId || markingReadIds.value[chatId]) {
+    return
+  }
+
+  markingReadIds.value = { ...markingReadIds.value, [chatId]: true }
+
+  try {
+    await markChatAsRead(chatId)
+  } catch {
+    // Reading should stay non-blocking for the UI.
+  } finally {
+    const next = { ...markingReadIds.value }
+    delete next[chatId]
+    markingReadIds.value = next
+  }
+}
+
 async function loadChats() {
   isChatsLoading.value = true
   chatsError.value = ''
@@ -119,6 +217,9 @@ async function loadMessages(chatId: string) {
 
   try {
     messages.value = sortAndDedupeMessages(await fetchChatMessages(chatId))
+    patchChat(chatId, { unread_count: 0 })
+    markMessagesAsReadLocally(chatId)
+    void syncChatReadState(chatId)
   } catch (error) {
     messagesError.value = getApiErrorMessage(error, 'Не удалось загрузить сообщения.')
     messages.value = []
@@ -150,6 +251,16 @@ function connectSocket(chatId: string) {
     wsBase: import.meta.env.VITE_WS_BASE_URL,
     onMessage: (message) => {
       messages.value = sortAndDedupeMessages([...messages.value, message])
+      patchChat(chatId, {
+        last_message: message.body || '',
+        last_message_at: message.created_at,
+      })
+
+      if (message.sender_user_id !== currentUserId.value) {
+        markMessagesAsReadLocally(chatId)
+        patchChat(chatId, { unread_count: 0 })
+        void syncChatReadState(chatId)
+      }
     },
     onStateChange: (state) => {
       socketState.value = state
@@ -180,9 +291,18 @@ async function handleSendMessage() {
   try {
     const sentViaSocket = chatClient.value?.send(body) ?? false
 
+    patchChat(selectedChatId.value, {
+      last_message: body,
+      last_message_at: new Date().toISOString(),
+    })
+
     if (!sentViaSocket) {
       const message = await sendChatMessage(selectedChatId.value, { body })
       messages.value = sortAndDedupeMessages([...messages.value, message])
+      patchChat(selectedChatId.value, {
+        last_message: message.body || body,
+        last_message_at: message.created_at || new Date().toISOString(),
+      })
     }
 
     messageForm.body = ''
@@ -221,7 +341,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="page-shell">
+  <main class="page-shell chats-shell">
     <section class="chats-page">
 
       <div class="chat-layout">
@@ -239,7 +359,7 @@ onBeforeUnmount(() => {
               :key="chat.id"
               :to="`/chats/${chat.id}`"
               class="conversation-card"
-              :class="{ active: selectedChatId === chat.id }"
+              :class="{ active: selectedChatId === chat.id, unread: (chat.unread_count || 0) > 0 && selectedChatId !== chat.id }"
             >
               <div class="conversation-head">
                 <div class="conversation-avatar">
@@ -254,14 +374,12 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
                 <div class="conversation-copy">
-                  <strong>{{ chat.participant_name || 'Собеседник' }}</strong>
-                  <span>{{ chat.company_legal_name || 'Компания не указана' }}</span>
+                  <strong :title="getChatTitle(chat)">{{ getChatTitle(chat) }}</strong>
+                  <div class="conversation-subline">
+                    <span :title="getChatSubtitle(chat)">{{ getChatSubtitle(chat) }}</span>
+                  </div>
                 </div>
-              </div>
-              <p class="conversation-opportunity">{{ chat.opportunity_title || 'Возможность не указана' }}</p>
-              <div class="conversation-meta">
-                <span>{{ chat.last_message || 'Сообщений пока нет' }}</span>
-                <span>{{ chat.last_message_at ? formatDate(chat.last_message_at) : '' }}</span>
+                <span v-if="(chat.unread_count || 0) > 0" class="unread-badge">{{ chat.unread_count }}</span>
               </div>
             </RouterLink>
           </div>
@@ -272,7 +390,9 @@ onBeforeUnmount(() => {
             <div class="panel-head">
               <div>
                 <h2>{{ selectedChat.participant_name || selectedChat.company_legal_name || 'Чат' }}</h2>
-                <p class="hero-copy">{{ selectedChat.opportunity_title || 'Без привязки к возможности' }}</p>
+                <p v-if="getSelectedChatHeaderSubtitle(selectedChat)" class="chat-subtitle">
+                  {{ getSelectedChatHeaderSubtitle(selectedChat) }}
+                </p>
               </div>
               <RouterLink
                 v-if="selectedChatProfileLink"
@@ -280,7 +400,7 @@ onBeforeUnmount(() => {
                 class="ghost-button"
                 @click="saveSelectedChatProfilePreview"
               >
-                {{ session.role.value === 'employer' ? 'Профиль кандидата' : 'Профиль компании' }}
+                {{ selectedChatProfileLabel }}
               </RouterLink>
             </div>
 
@@ -307,9 +427,14 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
                 <div class="message-bubble">
-                  <strong>{{ message.sender_name || message.sender_user_id || 'Пользователь' }}</strong>
+                  <div class="message-meta-line">
+                    <strong>{{ message.sender_name || message.sender_user_id || 'Пользователь' }}</strong>
+                    <span>{{ message.created_at ? formatDate(message.created_at) : '' }}</span>
+                  </div>
                   <p class="message-body">{{ message.body || '' }}</p>
-                  <span>{{ message.created_at ? formatDate(message.created_at) : '' }}</span>
+                  <span v-if="message.sender_user_id === currentUserId && message.is_read" class="message-read-status">
+                    Прочитано
+                  </span>
                 </div>
               </article>
             </div>
@@ -317,15 +442,13 @@ onBeforeUnmount(() => {
             <form class="message-form" @submit.prevent="handleSendMessage">
               <textarea
                 v-model="messageForm.body"
-                rows="3"
+                rows="1"
                 placeholder="Введите сообщение"
               />
-              <div class="message-form-actions">
-                <p v-if="sendingError" class="panel-status error">{{ sendingError }}</p>
-                <button class="primary-button" type="submit" :disabled="isSending || !messageForm.body.trim()">
-                  {{ isSending ? 'Отправляем...' : 'Отправить' }}
-                </button>
-              </div>
+              <button class="primary-button send-button" type="submit" :disabled="isSending || !messageForm.body.trim()">
+                <LucideSendHorizontal class="send-icon" aria-hidden="true" />
+              </button>
+              <p v-if="sendingError" class="panel-status error message-form-error">{{ sendingError }}</p>
             </form>
           </div>
 
@@ -345,6 +468,14 @@ onBeforeUnmount(() => {
   margin: 0 auto;
   display: grid;
   gap: 16px;
+  height: 100%;
+}
+
+.chats-shell {
+  height: calc(100dvh - 78px);
+  min-height: calc(100dvh - 78px);
+  padding-bottom: 20px;
+  overflow: hidden;
 }
 
 .chats-hero,
@@ -366,7 +497,14 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.chat-main {
+  display: grid;
+  height: 100%;
+  min-height: 0;
 }
 
 .hero-actions,
@@ -377,6 +515,23 @@ onBeforeUnmount(() => {
 .chat-panel {
   display: grid;
   gap: 12px;
+}
+
+.chat-sidebar,
+.chat-panel {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-sidebar {
+  grid-template-rows: auto auto 1fr;
+  align-self: stretch;
+}
+
+.chat-panel {
+  grid-template-rows: auto auto 1fr auto;
+  align-content: stretch;
+  height: 100%;
 }
 
 .hero-actions {
@@ -399,10 +554,14 @@ h2 {
   font-family: var(--font-heading);
 }
 
+.chat-subtitle {
+  margin: 6px 0 0;
+  color: #5f6b7a;
+  line-height: 1.45;
+}
+
 .hero-copy,
-.panel-status,
-.conversation-meta,
-.conversation-opportunity {
+.panel-status {
   margin: 0;
   color: #5f6b7a;
   line-height: 1.5;
@@ -413,18 +572,21 @@ h2 {
 }
 
 .panel-head,
-.conversation-head,
-.message-form-actions {
+.conversation-head {
   display: flex;
   align-items: start;
   justify-content: space-between;
   gap: 10px;
 }
 
+.conversation-head {
+  justify-content: flex-start;
+}
+
 .conversation-card {
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 10px 12px;
   border: 1px solid #e4eaf1;
   border-radius: 10px;
   background: #fafbfd;
@@ -434,6 +596,32 @@ h2 {
 .conversation-card.active {
   border-color: rgba(41, 82, 204, 0.22);
   background: rgba(41, 82, 204, 0.06);
+}
+
+.conversation-card.unread {
+  border-color: rgba(41, 82, 204, 0.18);
+  background: rgba(41, 82, 204, 0.035);
+}
+
+.conversation-list {
+  align-content: start;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #2952cc;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  flex: 0 0 auto;
 }
 
 .conversation-avatar,
@@ -462,7 +650,9 @@ h2 {
 
 .conversation-copy {
   display: grid;
-  gap: 4px;
+  gap: 2px;
+  min-width: 0;
+  justify-items: start;
 }
 
 .conversation-copy strong,
@@ -470,16 +660,17 @@ h2 {
   color: #162033;
 }
 
+.conversation-copy strong,
+.conversation-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .conversation-copy span {
   color: #5f6b7a;
   font-size: 0.82rem;
-}
-
-.conversation-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: 0.8rem;
 }
 
 .socket-state {
@@ -532,11 +723,18 @@ h2 {
 
 .message-bubble {
   display: grid;
-  gap: 6px;
-  padding: 12px;
+  gap: 4px;
+  padding: 10px 12px;
   border: 1px solid #e4eaf1;
   border-radius: 12px;
   background: #fafbfd;
+}
+
+.message-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
 }
 
 .message-bubble p,
@@ -556,14 +754,71 @@ h2 {
   font-size: 0.8rem;
 }
 
+.message-read-status {
+  color: #2952cc;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
 .message-form textarea {
-  min-height: 92px;
-  padding: 11px 12px;
+  min-height: 42px;
+  max-height: 120px;
+  padding: 9px 11px;
   border: 1px solid #d7dee7;
   border-radius: 10px;
   background: #fff;
-  resize: vertical;
+  resize: none;
   font: inherit;
+  position: relative;
+  z-index: 1;
+}
+
+.message-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  padding-bottom: 2px;
+  border-top: 1px solid rgba(18, 38, 63, 0.08);
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  isolation: isolate;
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.messages-list {
+  min-height: 0;
+  max-height: none;
+  padding-right: 4px;
+  padding-bottom: 8px;
+  overflow-y: auto;
+}
+
+.send-button {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  border-radius: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.send-button:hover,
+.send-button:focus-visible {
+  transform: none;
+}
+
+.send-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.message-form-error {
+  grid-column: 1 / -1;
 }
 
 .secondary-button {
@@ -589,8 +844,32 @@ h2 {
 }
 
 @media (max-width: 900px) {
+  .chats-shell {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
   .chat-layout {
     grid-template-columns: 1fr;
+  }
+
+  .chat-sidebar,
+  .chat-panel,
+  .messages-list {
+    overflow: visible;
+  }
+
+  .chat-sidebar {
+    grid-template-rows: none;
+  }
+
+  .message-form {
+    grid-template-columns: 1fr;
+  }
+
+  .message-form-actions {
+    min-width: 0;
   }
 }
 </style>

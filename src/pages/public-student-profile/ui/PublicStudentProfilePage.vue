@@ -2,18 +2,29 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
+import { StudentConnectionActions, useApplicantNetwork } from '@/features/contacts'
+import { useSession } from '@/features/session/model/session'
+import { RecommendationComposer } from '@/features/recommendations'
 import { fetchStudentById, getApiErrorMessage } from '@/shared/api'
 import type { StudentProfileDto } from '@/shared/api'
+import { ensureChatWithUser } from '@/shared/lib/chat'
 import { getStudentProfilePreview } from '@/shared/lib/profile-preview'
 import { formatDate } from '@/shared/lib/formatters'
+import { showErrorToast, showSuccessToast } from '@/shared/lib/toast'
 
 const route = useRoute()
+const session = useSession()
+const network = useApplicantNetwork()
 
 const profileId = computed(() => String(route.params.id || ''))
 const preview = computed(() => getStudentProfilePreview(profileId.value))
 const profile = ref<StudentProfileDto | null>(null)
 const isLoading = ref(true)
 const profileError = ref('')
+const chatLoading = ref(false)
+const contactModalOpen = ref(false)
+const recommendationOpen = ref(false)
+const requestMessage = ref('')
 
 const fullName = computed(() => {
   const current = profile.value
@@ -108,6 +119,87 @@ const initials = computed(() =>
     .toUpperCase(),
 )
 
+const relation = computed(() => network.getRelationForUserId(profileId.value))
+const requestItem = computed(() => network.getRequestForUserId(profileId.value))
+const contactLoading = computed(() => {
+  const sending = network.sendingByUserId.value[profileId.value]
+  const updating = requestItem.value ? network.updatingByRequestId.value[requestItem.value.id] : false
+  return Boolean(sending || updating)
+})
+const recommendationDisabled = computed(() => session.role.value !== 'employer')
+
+function openContactModal() {
+  requestMessage.value = ''
+  contactModalOpen.value = true
+}
+
+function closeContactModal() {
+  contactModalOpen.value = false
+  requestMessage.value = ''
+}
+
+async function handleSubmitContactRequest() {
+  try {
+    await network.sendRequest(profileId.value, requestMessage.value)
+    showSuccessToast('Запрос в контакты отправлен.')
+    closeContactModal()
+  } catch (error) {
+    showErrorToast(error instanceof Error ? error.message : 'Не удалось отправить запрос в контакты.')
+  }
+}
+
+async function handleAcceptRequest() {
+  if (!requestItem.value) {
+    return
+  }
+
+  try {
+    await network.acceptRequest(requestItem.value.id)
+    showSuccessToast('Запрос в контакты принят.')
+  } catch (error) {
+    showErrorToast(error instanceof Error ? error.message : 'Не удалось принять запрос.')
+  }
+}
+
+async function handleRejectRequest() {
+  if (!requestItem.value) {
+    return
+  }
+
+  try {
+    await network.rejectRequest(requestItem.value.id)
+    showSuccessToast('Запрос отклонён.')
+  } catch (error) {
+    showErrorToast(error instanceof Error ? error.message : 'Не удалось отклонить запрос.')
+  }
+}
+
+async function handleCancelRequest() {
+  if (!requestItem.value) {
+    return
+  }
+
+  try {
+    await network.cancelRequest(requestItem.value.id)
+    showSuccessToast('Запрос отменён.')
+  } catch (error) {
+    showErrorToast(error instanceof Error ? error.message : 'Не удалось отменить запрос.')
+  }
+}
+
+async function handleOpenChat() {
+  chatLoading.value = true
+
+  try {
+    const chat = await ensureChatWithUser({ participantUserId: profileId.value })
+    window.location.assign(`/chats/${chat.id}`)
+  } catch (error) {
+    showErrorToast(error instanceof Error ? error.message : 'Не удалось открыть чат.')
+  } finally {
+    chatLoading.value = false
+  }
+}
+
 async function loadProfile() {
   if (!profileId.value) {
     profile.value = null
@@ -129,7 +221,21 @@ async function loadProfile() {
   }
 }
 
-onMounted(loadProfile)
+async function loadPage() {
+  await session.restoreSession()
+
+  if (session.currentUser.value?.id) {
+    try {
+      await network.loadNetwork(session.currentUser.value.id)
+    } catch {
+      // The page can still render even if the contact network failed to load.
+    }
+  }
+
+  await loadProfile()
+}
+
+onMounted(loadPage)
 watch(profileId, loadProfile)
 </script>
 
@@ -161,8 +267,24 @@ watch(profileId, loadProfile)
               </div>
             </div>
             <strong>Профиль кандидата</strong>
+            <div class="connection-panel">
+              <span class="connection-label">Нетворкинг</span>
+              <p class="connection-copy">Добавьте кандидата в контакты, примите запрос или сразу перейдите в чат.</p>
+            </div>
             <div class="hero-side-actions">
-              <RouterLink to="/chats" class="primary-button">Открыть чаты</RouterLink>
+              <StudentConnectionActions
+                v-if="session.isAuthenticated.value"
+                :relation="relation"
+                :contact-loading="contactLoading"
+                :chat-loading="chatLoading"
+                :recommendation-disabled="recommendationDisabled"
+                @add="openContactModal"
+                @accept="handleAcceptRequest"
+                @reject="handleRejectRequest"
+                @cancel="handleCancelRequest"
+                @message="handleOpenChat"
+                @recommend="recommendationOpen = true"
+              />
               <RouterLink to="/" class="ghost-button">На главную</RouterLink>
             </div>
           </div>
@@ -224,6 +346,50 @@ watch(profileId, loadProfile)
         </div>
       </article>
     </section>
+
+    <div v-if="contactModalOpen" class="modal-overlay" @click.self="closeContactModal">
+      <div class="modal-card">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">Connect</p>
+            <h2>Добавить в контакты</h2>
+            <p class="helper-text">Можно отправить запрос с коротким сопроводительным сообщением.</p>
+          </div>
+          <button type="button" class="ghost-button close-button" @click="closeContactModal">Закрыть</button>
+        </div>
+
+        <div class="modal-form">
+          <label class="field">
+            <span>Кому</span>
+            <input :value="fullName" type="text" readonly />
+          </label>
+
+          <label class="field">
+            <span>Сообщение</span>
+            <textarea
+              v-model="requestMessage"
+              rows="5"
+              placeholder="Коротко объясните, почему хотите добавить пользователя в контакты"
+            />
+          </label>
+
+          <div class="modal-actions">
+            <button class="primary-button" type="button" :disabled="contactLoading" @click="handleSubmitContactRequest">
+              {{ contactLoading ? 'Отправляем...' : 'Отправить запрос' }}
+            </button>
+            <button class="ghost-button" type="button" @click="closeContactModal">Отмена</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <RecommendationComposer
+      :open="recommendationOpen"
+      :to-user-id="profileId"
+      :target-label="fullName"
+      @close="recommendationOpen = false"
+      @submitted="recommendationOpen = false"
+    />
   </main>
 </template>
 
@@ -402,11 +568,97 @@ h1 {
   padding-top: 4px;
 }
 
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(6px);
+}
+
+.modal-card {
+  width: min(680px, 100%);
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid rgba(18, 38, 63, 0.08);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+}
+
+.modal-head,
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.modal-form {
+  display: grid;
+  gap: 14px;
+}
+
+.helper-text {
+  margin: 0;
+  color: #5f6b7a;
+  line-height: 1.5;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  color: #627087;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.field input,
+.field textarea {
+  min-height: 44px;
+  padding: 11px 13px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+}
+
+.field textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
 .section-copy {
   margin: 0;
   color: #5c6778;
   line-height: 1.6;
   font-size: 0.95rem;
+}
+
+.connection-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.connection-label {
+  color: #2952cc;
+  font: 700 0.72rem/1 var(--font-mono);
+  text-transform: uppercase;
+}
+
+.connection-copy {
+  margin: 0;
+  color: #5c6778;
+  line-height: 1.5;
+  font-size: 0.92rem;
 }
 
 .error-copy {

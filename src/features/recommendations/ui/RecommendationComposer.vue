@@ -2,8 +2,9 @@
 import { computed, reactive, ref, watch } from 'vue'
 
 import type { Opportunity } from '@/entities/opportunity/model/types'
-import { createRecommendation, fetchPublicCatalog, getApiErrorMessage } from '@/shared/api'
-import { showSuccessToast } from '@/shared/lib/toast'
+import { useSession } from '@/features/session/model/session'
+import { createRecommendation, fetchEmployerOpportunities, getApiErrorMessage } from '@/shared/api'
+import { showErrorToast, showSuccessToast } from '@/shared/lib/toast'
 
 const props = defineProps<{
   open: boolean
@@ -16,6 +17,7 @@ const emit = defineEmits<{
   submitted: []
 }>()
 
+const session = useSession()
 const opportunities = ref<Opportunity[]>([])
 const isLoading = ref(false)
 const opportunitiesError = ref('')
@@ -38,10 +40,15 @@ async function loadOpportunities() {
   opportunitiesError.value = ''
 
   try {
-    const catalog = await fetchPublicCatalog()
-    opportunities.value = catalog.opportunities
+    if (session.role.value !== 'employer') {
+      opportunities.value = []
+      opportunitiesError.value = 'Рекомендации доступны только работодателям с собственными возможностями.'
+      return
+    }
+
+    opportunities.value = await fetchEmployerOpportunities()
   } catch (error) {
-    opportunitiesError.value = getApiErrorMessage(error, 'Не удалось загрузить список вакансий.')
+    opportunitiesError.value = getApiErrorMessage(error, 'Не удалось загрузить список возможностей работодателя.')
   } finally {
     isLoading.value = false
   }
@@ -67,6 +74,7 @@ async function handleSubmit() {
     emit('submitted')
   } catch (error) {
     submitError.value = getApiErrorMessage(error, 'Не удалось отправить рекомендацию.')
+    showErrorToast(submitError.value)
   } finally {
     isSubmitting.value = false
   }
@@ -115,14 +123,14 @@ watch(
 
       <form v-else class="modal-form" @submit.prevent="handleSubmit">
         <label class="field">
-          <span>to_user_id</span>
+          <span>Получатель</span>
           <input :value="form.toUserId" type="text" readonly />
         </label>
 
         <label class="field">
-          <span>opportunity_id</span>
+          <span>Возможность</span>
           <select v-model="form.opportunityId" :disabled="isLoading || !opportunities.length" required>
-            <option value="">Выберите вакансию</option>
+            <option value="">Выберите возможность</option>
             <option v-for="opportunity in opportunities" :key="opportunity.id" :value="opportunity.id">
               {{ opportunity.title }} · {{ opportunity.companyName }}
             </option>
@@ -132,11 +140,11 @@ watch(
         <p v-if="opportunitiesError" class="status-text error">{{ opportunitiesError }}</p>
         <p v-else-if="isLoading" class="status-text">Загружаем список вакансий...</p>
         <p v-else-if="!opportunities.length" class="status-text">
-          Пока нет доступных вакансий для рекомендации.
+          Пока нет доступных возможностей для рекомендации.
         </p>
 
         <label class="field">
-          <span>message</span>
+          <span>Комментарий</span>
           <textarea
             v-model="form.message"
             rows="5"

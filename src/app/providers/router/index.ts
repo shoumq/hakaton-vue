@@ -73,7 +73,7 @@ const router = createRouter({
       path: '/contacts',
       name: 'contacts',
       component: ContactsPage,
-      meta: { requiresRole: 'student' },
+      meta: { requiresAuth: true },
     },
     {
       path: '/dashboard/applicant',

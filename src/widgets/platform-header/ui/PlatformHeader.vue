@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import LucideBell from '~icons/lucide/bell'
 
 import { useSession } from '@/features/session/model/session'
 import { fetchNotifications, getApiErrorMessage } from '@/shared/api'
@@ -122,11 +123,15 @@ onBeforeUnmount(() => {
 
     <nav class="header-nav">
       <RouterLink to="/" class="nav-link">Главная</RouterLink>
+      <RouterLink v-if="session.isAuthenticated.value" to="/contacts" class="nav-link">
+        Контакты
+      </RouterLink>
+      <RouterLink v-if="session.isAuthenticated.value" to="/chats" class="nav-link">
+        Чаты
+      </RouterLink>
       <div v-if="session.isAuthenticated.value" class="notifications-menu-shell">
         <button class="nav-link icon-button" type="button" @click.stop="toggleNotifications">
-          <svg class="bell-icon" aria-hidden="true" viewBox="0 0 24 24">
-            <use href="/icons.svg#bell-icon" />
-          </svg>
+          <LucideBell class="bell-icon" aria-hidden="true" />
           <span v-if="unreadCount" class="notification-badge">{{ unreadCount }}</span>
         </button>
 
