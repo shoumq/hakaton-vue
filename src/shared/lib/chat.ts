@@ -1,4 +1,4 @@
-import { createMyChat } from '@/shared/api'
+import { createMyChat, fetchMyChats } from '@/shared/api'
 import type {
   ChatConversationDto,
   ChatMessageDto,
@@ -31,6 +31,34 @@ export async function startChatFromNotification(notification: NotificationDto): 
   return createMyChat({
     participant_user_id: notification.employer_user_id,
     opportunity_id: notification.related_entity_id || undefined,
+  })
+}
+
+export async function ensureChatWithUser(params: {
+  participantUserId: string
+  opportunityId?: string
+  existingChats?: ChatConversationDto[]
+}) {
+  const chats = params.existingChats ?? (await fetchMyChats())
+  const directMatch = chats.find((chat) => {
+    if (chat.participant_user_id !== params.participantUserId) {
+      return false
+    }
+
+    if (!params.opportunityId) {
+      return true
+    }
+
+    return chat.opportunity_id === params.opportunityId || !chat.opportunity_id
+  })
+
+  if (directMatch) {
+    return directMatch
+  }
+
+  return createMyChat({
+    participant_user_id: params.participantUserId,
+    opportunity_id: params.opportunityId,
   })
 }
 
@@ -222,7 +250,7 @@ export class ChatSocketClient {
       return false
     }
 
-    this.socket.send(JSON.stringify({ body: trimmed }))
+    this.socket.send(JSON.stringify({ body }))
     return true
   }
 

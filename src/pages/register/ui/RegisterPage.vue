@@ -10,6 +10,7 @@ import {
   updateEmployerCompany,
 } from '@/shared/api'
 import type { VerificationInput } from '@/shared/api'
+import { showErrorToast, showSuccessToast } from '@/shared/lib/toast'
 
 const router = useRouter()
 const session = useSession()
@@ -103,6 +104,7 @@ async function handleRegister() {
 
   if (!result.ok) {
     errorMessage.value = result.message
+    showErrorToast(result.message)
     return
   }
 
@@ -124,12 +126,14 @@ async function handleRegister() {
       }
 
       successMessage.value = 'Аккаунт и профиль компании созданы.'
+      showSuccessToast(successMessage.value)
     } catch (error) {
       successMessage.value = 'Аккаунт создан, но данные компании сохранились не полностью.'
       errorMessage.value = getApiErrorMessage(
         error,
         'Не удалось завершить настройку компании или получить данные по ИНН.',
       )
+      showErrorToast(errorMessage.value)
     }
 
     await router.push('/dashboard/employer')
@@ -137,6 +141,7 @@ async function handleRegister() {
   }
 
   successMessage.value = 'Аккаунт создан.'
+  showSuccessToast(successMessage.value)
   await router.push('/dashboard/applicant')
 }
 </script>

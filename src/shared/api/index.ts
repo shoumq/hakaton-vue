@@ -184,12 +184,39 @@ export interface PortfolioProjectDto {
   project_url?: string
 }
 
+export type ContactRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled'
+
+export interface ContactUserSummaryDto {
+  user_id?: string
+  id?: string
+  display_name?: string
+  avatar_url?: string
+  title?: string
+  university_name?: string
+  faculty?: string
+  specialization?: string
+}
+
 export interface ContactDto {
   id: string
+  user_id?: string
   display_name?: string
+  avatar_url?: string
   title?: string
   message?: string
   status?: string
+  created_at?: string
+  updated_at?: string
+  direction?: 'incoming' | 'outgoing'
+  is_incoming?: boolean
+  requester_user_id?: string
+  receiver_user_id?: string
+  from_user_id?: string
+  to_user_id?: string
+  user?: ContactUserSummaryDto | null
+  contact_user?: ContactUserSummaryDto | null
+  requester?: ContactUserSummaryDto | null
+  receiver?: ContactUserSummaryDto | null
 }
 
 export interface NotificationDto {
@@ -225,6 +252,15 @@ export interface ChatConversationDto {
 export interface ChatCreateInput {
   participant_user_id: string
   opportunity_id?: string
+}
+
+export interface ContactRequestCreateInput {
+  to_user_id: string
+  message?: string
+}
+
+export interface ContactRequestUpdateInput {
+  status: ContactRequestStatus
 }
 
 export interface ChatMessageDto {
@@ -771,6 +807,25 @@ export async function fetchContactRequests() {
   })
 
   return asArray<ContactDto>(data)
+}
+
+export async function createContactRequest(payload: ContactRequestCreateInput) {
+  return request<ContactDto>({
+    method: 'post',
+    url: '/me/contact-requests',
+    data: payload,
+  })
+}
+
+export async function updateContactRequest(
+  requestId: string,
+  payload: ContactRequestUpdateInput,
+) {
+  return request<ContactDto>({
+    method: 'patch',
+    url: `/me/contact-requests/${requestId}`,
+    data: payload,
+  })
 }
 
 export async function fetchNotifications() {

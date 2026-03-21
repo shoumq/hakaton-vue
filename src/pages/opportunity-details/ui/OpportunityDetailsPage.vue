@@ -19,6 +19,7 @@ import {
   formatWorkFormat,
 } from '@/shared/lib/formatters'
 import { saveCompanyProfilePreview } from '@/shared/lib/profile-preview'
+import { showErrorToast, showInfoToast, showSuccessToast } from '@/shared/lib/toast'
 
 const route = useRoute()
 const router = useRouter()
@@ -53,6 +54,7 @@ async function loadPage() {
     }
   } catch (error) {
     errorMessage.value = getApiErrorMessage(error, 'Не удалось загрузить страницу возможности.')
+    showErrorToast(errorMessage.value)
   } finally {
     isLoading.value = false
   }
@@ -64,12 +66,14 @@ async function handleApply() {
   }
 
   if (!session.isAuthenticated.value) {
+    showInfoToast('Сначала войдите в аккаунт, чтобы откликнуться.')
     await router.push('/login')
     return
   }
 
   if (!isStudent.value) {
     errorMessage.value = 'Отклик доступен только для профиля соискателя.'
+    showErrorToast(errorMessage.value)
     return
   }
 
@@ -83,8 +87,10 @@ async function handleApply() {
       cover_letter: applyForm.coverLetter.trim() || undefined,
     })
     successMessage.value = 'Отклик отправлен.'
+    showSuccessToast(successMessage.value)
   } catch (error) {
     errorMessage.value = getApiErrorMessage(error, 'Не удалось отправить отклик.')
+    showErrorToast(errorMessage.value)
   } finally {
     isSubmitting.value = false
   }

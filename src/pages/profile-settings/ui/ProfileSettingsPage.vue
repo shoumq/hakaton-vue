@@ -123,11 +123,16 @@ const overviewFacts = computed(() => {
   return [{ label: 'Роль', value: 'Не определена' }]
 })
 
+const studentProfileTitle = computed(() => {
+  const fullName = [studentForm.firstName, studentForm.lastName].filter(Boolean).join(' ').trim()
+  return fullName || studentForm.displayName || session.currentUser.value?.displayName || 'Р‘РµР· РёРјРµРЅРё'
+})
+
 const avatarFallback = computed(() => {
   const source =
     session.currentUser.value?.displayName ||
     companyForm.brandName ||
-    studentForm.displayName ||
+    studentProfileTitle.value ||
     session.currentUser.value?.email ||
     'U'
 
@@ -370,7 +375,7 @@ onMounted(loadPage)
             </div>
             <div class="profile-badge-copy">
               <span class="profile-badge-label">{{ isEmployer ? 'Карточка компании' : 'Личный профиль' }}</span>
-              <strong>{{ isEmployer ? companyForm.brandName || companyForm.legalName || 'Без названия' : studentForm.displayName || session.currentUser.value?.displayName || 'Без имени' }}</strong>
+              <strong>{{ isEmployer ? companyForm.brandName || companyForm.legalName || 'Без названия' : studentProfileTitle }}</strong>
               <p>
                 {{ isEmployer ? 'Обновите описание, бренд и ключевые реквизиты.' : 'Поддерживайте профиль актуальным для откликов и контактов.' }}
               </p>
@@ -404,10 +409,6 @@ onMounted(loadPage)
               <p>Базовые данные, по которым вас видят внутри платформы.</p>
             </div>
             <div class="settings-grid">
-              <label class="field">
-                <span>Отображаемое имя</span>
-                <input v-model="studentForm.displayName" type="text" placeholder="Как показывать вас в профиле" />
-              </label>
               <label class="field">
                 <span>Имя</span>
                 <input v-model="studentForm.firstName" type="text" placeholder="Алексей" />

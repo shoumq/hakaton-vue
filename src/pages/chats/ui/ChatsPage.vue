@@ -169,9 +169,9 @@ function saveSelectedChatProfilePreview() {
 
 async function handleSendMessage() {
   sendingError.value = ''
-  const body = messageForm.body.trim()
+  const body = messageForm.body
 
-  if (!selectedChatId.value || !body) {
+  if (!selectedChatId.value || !body.trim()) {
     return
   }
 
@@ -308,7 +308,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="message-bubble">
                   <strong>{{ message.sender_name || message.sender_user_id || 'Пользователь' }}</strong>
-                  <p>{{ message.body || '' }}</p>
+                  <p class="message-body">{{ message.body || '' }}</p>
                   <span>{{ message.created_at ? formatDate(message.created_at) : '' }}</span>
                 </div>
               </article>
@@ -544,6 +544,11 @@ h2 {
   margin: 0;
   color: #162033;
   line-height: 1.5;
+}
+
+.message-body {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .message-bubble span {

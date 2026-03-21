@@ -27,6 +27,7 @@ import type {
 } from '@/shared/api'
 import { formatDate } from '@/shared/lib/formatters'
 import { saveStudentProfilePreview } from '@/shared/lib/profile-preview'
+import { showErrorToast, showSuccessToast } from '@/shared/lib/toast'
 
 interface OpportunityFormState {
   title: string
@@ -506,9 +507,11 @@ async function handleSubmitVerification() {
   try {
     await submitEmployerVerification(buildVerificationPayload())
     infoMessage.value = 'Заявка на верификацию отправлена.'
+    showSuccessToast(infoMessage.value)
     await loadDashboard()
   } catch (error) {
     errorMessage.value = getApiErrorMessage(error, 'Не удалось отправить верификацию.')
+    showErrorToast(errorMessage.value)
   } finally {
     isSubmittingVerification.value = false
   }
@@ -522,10 +525,12 @@ async function handleCreateOpportunity() {
   try {
     await createEmployerOpportunity(buildOpportunityPayload())
     infoMessage.value = 'Карточка возможности создана.'
+    showSuccessToast(infoMessage.value)
     resetOpportunityForm()
     employerOpportunities.value = await fetchEmployerOpportunities()
   } catch (error) {
     errorMessage.value = getApiErrorMessage(error, 'Не удалось создать возможность.')
+    showErrorToast(errorMessage.value)
   } finally {
     isSubmittingOpportunity.value = false
   }

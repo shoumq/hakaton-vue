@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { useSession } from '@/features/session/model/session'
 import { ChatsPage } from '@/pages/chats'
+import { ContactsPage } from '@/pages/contacts'
 import { CuratorDashboardPage } from '@/pages/dashboard-curator'
 import { CuratorCompanyDetailsPage } from '@/pages/curator-company-details'
 import { EmployerDashboardPage } from '@/pages/dashboard-employer'
@@ -67,6 +68,12 @@ const router = createRouter({
       name: 'chats',
       component: ChatsPage,
       meta: { requiresAuth: true },
+    },
+    {
+      path: '/contacts',
+      name: 'contacts',
+      component: ContactsPage,
+      meta: { requiresRole: 'student' },
     },
     {
       path: '/dashboard/applicant',

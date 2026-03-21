@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { useSession } from '@/features/session/model/session'
+import { showErrorToast, showSuccessToast } from '@/shared/lib/toast'
 
 const router = useRouter()
 const session = useSession()
@@ -32,10 +33,12 @@ async function handleLogin() {
 
   if (!result.ok) {
     errorMessage.value = result.message
+    showErrorToast(result.message)
     return
   }
 
   errorMessage.value = ''
+  showSuccessToast('Вход выполнен.')
   await router.push(resolveRoute(result.user.role))
 }
 </script>
