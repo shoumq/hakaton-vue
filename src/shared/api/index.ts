@@ -268,7 +268,8 @@ export interface ChatCreateInput {
 }
 
 export interface ContactRequestCreateInput {
-  to_user_id: string
+  to_user_id?: string
+  receiver_user_id?: string
   message?: string
 }
 
@@ -874,10 +875,16 @@ export async function fetchContactRequests() {
 }
 
 export async function createContactRequest(payload: ContactRequestCreateInput) {
+  const targetUserId = payload.receiver_user_id?.trim() || payload.to_user_id?.trim() || ''
+
   return request<ContactDto>({
     method: 'post',
     url: '/me/contact-requests',
-    data: payload,
+    data: {
+      ...payload,
+      to_user_id: targetUserId || undefined,
+      receiver_user_id: targetUserId || undefined,
+    },
   })
 }
 

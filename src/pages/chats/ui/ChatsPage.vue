@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
+import LucideCheck from '~icons/lucide/check'
+import LucideCheckCheck from '~icons/lucide/check-check'
 import LucideSendHorizontal from '~icons/lucide/send-horizontal'
 
 import { useSession } from '@/features/session/model/session'
@@ -47,7 +49,27 @@ const selectedChat = computed(() => chats.value.find((item) => item.id === selec
 const currentUserId = computed(() => session.currentUser.value?.id || '')
 
 function isEmployerChat(chat: ChatConversationDto | null) {
-  return Boolean(chat && (chat.participant_role === 'employer' || chat.company_id))
+  if (!chat) {
+    return false
+  }
+
+  if (chat.participant_role === 'employer') {
+    return true
+  }
+
+  if (chat.participant_role === 'student') {
+    return false
+  }
+
+  if (session.role.value === 'student') {
+    return true
+  }
+
+  if (session.role.value === 'employer') {
+    return false
+  }
+
+  return Boolean(chat.company_id)
 }
 
 function getChatTitle(chat: ChatConversationDto | null) {
@@ -148,6 +170,45 @@ function sortAndDedupeMessages(list: ChatMessageDto[]) {
   return Array.from(byId.values()).sort((left, right) => {
     return new Date(left.created_at || 0).getTime() - new Date(right.created_at || 0).getTime()
   })
+}
+
+function getMessageDayKey(value?: string) {
+  if (!value) {
+    return ''
+  }
+
+  const date = new Date(value)
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+
+  return `${year}-${month}-${day}`
+}
+
+function shouldShowDateSeparator(index: number) {
+  const current = messages.value[index]
+  const previous = messages.value[index - 1]
+
+  if (!current?.created_at) {
+    return false
+  }
+
+  if (!previous?.created_at) {
+    return true
+  }
+
+  return getMessageDayKey(current.created_at) !== getMessageDayKey(previous.created_at)
+}
+
+function formatMessageTime(value?: string) {
+  if (!value) {
+    return ''
+  }
+
+  return new Intl.DateTimeFormat('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
 }
 
 function patchChat(chatId: string, patch: Partial<ChatConversationDto>) {
@@ -409,34 +470,38 @@ onBeforeUnmount(() => {
             <p v-else-if="!messages.length" class="panel-status">Сообщений пока нет. Начните диалог.</p>
 
             <div v-else class="messages-list">
-              <article
-                v-for="message in messages"
-                :key="message.id"
-                class="message-card"
-                :class="{ mine: message.sender_user_id === currentUserId }"
-              >
-                <div class="message-avatar">
-                  <img
-                    v-if="message.sender_avatar_url"
-                    :src="message.sender_avatar_url"
-                    alt="avatar"
-                    class="avatar-image"
-                  />
-                  <span v-else class="avatar-fallback">
-                    {{ (message.sender_name || 'U').slice(0, 2).toUpperCase() }}
-                  </span>
+              <template v-for="(message, index) in messages" :key="message.id">
+                <div v-if="shouldShowDateSeparator(index)" class="messages-date-separator">
+                  {{ message.created_at ? formatDate(message.created_at) : '' }}
                 </div>
-                <div class="message-bubble">
-                  <div class="message-meta-line">
-                    <strong>{{ message.sender_name || message.sender_user_id || 'Пользователь' }}</strong>
-                    <span>{{ message.created_at ? formatDate(message.created_at) : '' }}</span>
+                <article
+                  class="message-card"
+                  :class="{ mine: message.sender_user_id === currentUserId }"
+                >
+                  <div class="message-avatar">
+                    <img
+                      v-if="message.sender_avatar_url"
+                      :src="message.sender_avatar_url"
+                      alt="avatar"
+                      class="avatar-image"
+                    />
+                    <span v-else class="avatar-fallback">
+                      {{ (message.sender_name || 'U').slice(0, 2).toUpperCase() }}
+                    </span>
                   </div>
-                  <p class="message-body">{{ message.body || '' }}</p>
-                  <span v-if="message.sender_user_id === currentUserId && message.is_read" class="message-read-status">
-                    Прочитано
-                  </span>
-                </div>
-              </article>
+                  <div class="message-bubble">
+                    <div class="message-meta-line">
+                      <strong>{{ message.sender_name || message.sender_user_id || 'Пользователь' }}</strong>
+                      <span>{{ formatMessageTime(message.created_at) }}</span>
+                    </div>
+                    <p class="message-body">{{ message.body || '' }}</p>
+                    <span v-if="message.sender_user_id === currentUserId" class="message-read-status">
+                      <LucideCheckCheck v-if="message.is_read" class="read-icon" aria-hidden="true" />
+                      <LucideCheck v-else class="read-icon" aria-hidden="true" />
+                    </span>
+                  </div>
+                </article>
+              </template>
             </div>
 
             <form class="message-form" @submit.prevent="handleSendMessage">
@@ -574,7 +639,7 @@ h2 {
 .panel-head,
 .conversation-head {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
@@ -622,6 +687,8 @@ h2 {
   font-size: 0.72rem;
   font-weight: 700;
   flex: 0 0 auto;
+  margin-left: auto;
+  align-self: center;
 }
 
 .conversation-avatar,
@@ -719,15 +786,20 @@ h2 {
 .message-card.mine .message-bubble {
   order: 1;
   background: rgba(41, 82, 204, 0.08);
+  justify-self: end;
 }
 
 .message-bubble {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px;
   padding: 10px 12px;
   border: 1px solid #e4eaf1;
   border-radius: 12px;
   background: #fafbfd;
+  width: fit-content;
+  max-width: min(72%, 680px);
+  justify-self: start;
 }
 
 .message-meta-line {
@@ -735,6 +807,7 @@ h2 {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 10px;
+  grid-column: 1 / -1;
 }
 
 .message-bubble p,
@@ -745,6 +818,7 @@ h2 {
 }
 
 .message-body {
+  grid-column: 1 / 2;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -755,9 +829,18 @@ h2 {
 }
 
 .message-read-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  align-self: end;
   color: #2952cc;
-  font-size: 0.76rem;
-  font-weight: 600;
+  grid-column: 2 / 3;
+  grid-row: 2 / 3;
+}
+
+.read-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .message-form textarea {
@@ -794,6 +877,19 @@ h2 {
   padding-right: 4px;
   padding-bottom: 8px;
   overflow-y: auto;
+}
+
+.messages-date-separator {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(233, 239, 248, 0.92);
+  color: #5f6b7a;
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 .send-button {
