@@ -5,6 +5,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import type { Opportunity, OpportunityType, WorkFormat } from '@/entities/opportunity/model/types'
 import OpportunityCard from '@/entities/opportunity/ui/OpportunityCard.vue'
 import { useSession } from '@/features/session/model/session'
+import MapLibreOpportunityMap from '@/shared/ui/MapLibreOpportunityMap.vue'
 import {
   createRecommendation,
   createMyChat,
@@ -19,6 +20,7 @@ import {
 } from '@/shared/api'
 import type {
   BackendTag,
+  BackendLocation,
   EmployerApplicationDto,
   EmployerApplicationStatus,
   EmployerCompanyDto,
@@ -36,7 +38,12 @@ interface OpportunityFormState {
   companyName: string
   opportunityType: OpportunityType
   workFormat: WorkFormat
+  locationMode: 'catalog' | 'custom'
   locationId: string
+  locationAddress: string
+  locationDisplayText: string
+  locationLatitude: string
+  locationLongitude: string
   vacancyLevel: string
   employmentType: string
   salaryMin: string
@@ -58,7 +65,7 @@ const router = useRouter()
 const employerOpportunities = ref<Opportunity[]>([])
 const company = ref<EmployerCompanyDto | null>(null)
 const employerProfile = ref<Record<string, unknown> | null>(null)
-const locations = ref<Array<{ id: string; display_text?: string }>>([])
+const locations = ref<BackendLocation[]>([])
 const tags = ref<BackendTag[]>([])
 const isLoading = ref(true)
 const isSubmittingVerification = ref(false)
@@ -95,7 +102,12 @@ const opportunityForm = reactive<OpportunityFormState>({
   companyName: '',
   opportunityType: 'internship',
   workFormat: 'remote',
+  locationMode: 'catalog',
   locationId: '',
+  locationAddress: '',
+  locationDisplayText: '',
+  locationLatitude: '55.751244',
+  locationLongitude: '37.618423',
   vacancyLevel: 'junior',
   employmentType: 'part_time',
   salaryMin: '',
@@ -152,6 +164,11 @@ const formatOptions = [
   { value: 'remote', label: 'Удалённо' },
 ]
 
+const locationModeOptions = [
+  { value: 'catalog', label: 'Из каталога' },
+  { value: 'custom', label: 'Своя точка' },
+] as const
+
 const employmentOptions = [
   { value: 'full_time', label: 'Полная занятость' },
   { value: 'part_time', label: 'Частичная занятость' },
@@ -195,9 +212,39 @@ const canShowVerificationSection = computed(() => {
 const canCreateOpportunities = computed(() => company.value?.status === 'verified')
 
 const technologyTags = computed(() => tags.value.filter((tag) => tag.tag_type === 'technology'))
-const selectedLocationLabel = computed(
-  () => locations.value.find((location) => location.id === opportunityForm.locationId)?.display_text || '',
+const selectedCatalogLocation = computed(
+  () => locations.value.find((location) => location.id === opportunityForm.locationId) || null,
 )
+const parsedLocationLatitude = computed(() => Number(opportunityForm.locationLatitude))
+const parsedLocationLongitude = computed(() => Number(opportunityForm.locationLongitude))
+const previewLocationLabel = computed(() => {
+  if (opportunityForm.locationMode === 'custom') {
+    return opportunityForm.locationDisplayText.trim() || opportunityForm.locationAddress.trim()
+  }
+
+  return selectedCatalogLocation.value?.display_text || ''
+})
+const previewLocationAddress = computed(() => {
+  if (opportunityForm.locationMode === 'custom') {
+    return opportunityForm.locationAddress.trim()
+  }
+
+  return selectedCatalogLocation.value?.address_line || ''
+})
+const previewLocationLatitude = computed(() => {
+  if (opportunityForm.locationMode === 'custom') {
+    return Number.isFinite(parsedLocationLatitude.value) ? parsedLocationLatitude.value : 55.751244
+  }
+
+  return selectedCatalogLocation.value?.latitude ?? 55.751244
+})
+const previewLocationLongitude = computed(() => {
+  if (opportunityForm.locationMode === 'custom') {
+    return Number.isFinite(parsedLocationLongitude.value) ? parsedLocationLongitude.value : 37.618423
+  }
+
+  return selectedCatalogLocation.value?.longitude ?? 37.618423
+})
 const currentOpportunityTypeConfig = computed(
   () => opportunityTypeConfig[opportunityForm.opportunityType],
 )
@@ -261,7 +308,12 @@ function resetOpportunityForm() {
   opportunityForm.companyName = company.value?.brand_name || company.value?.legal_name || ''
   opportunityForm.opportunityType = 'internship'
   opportunityForm.workFormat = 'remote'
+  opportunityForm.locationMode = locations.value.length ? 'catalog' : 'custom'
   opportunityForm.locationId = locations.value[0]?.id ?? ''
+  opportunityForm.locationAddress = ''
+  opportunityForm.locationDisplayText = ''
+  opportunityForm.locationLatitude = locations.value[0]?.latitude ? String(locations.value[0].latitude) : '55.751244'
+  opportunityForm.locationLongitude = locations.value[0]?.longitude ? String(locations.value[0].longitude) : '37.618423'
   opportunityForm.vacancyLevel = 'junior'
   opportunityForm.employmentType = 'part_time'
   opportunityForm.salaryMin = ''
@@ -276,6 +328,47 @@ function resetOpportunityForm() {
   opportunityForm.eventEndAt = ''
   opportunityForm.status = 'draft'
   opportunityForm.selectedTechnologyTagIds = []
+}
+
+function syncLocationFromCatalog(location: BackendLocation | null) {
+  if (!location || opportunityForm.locationMode !== 'catalog') {
+    return
+  }
+
+  opportunityForm.locationLatitude =
+    typeof location.latitude === 'number' ? String(location.latitude) : '55.751244'
+  opportunityForm.locationLongitude =
+    typeof location.longitude === 'number' ? String(location.longitude) : '37.618423'
+}
+
+function handleLocationSelect(payload: { latitude: number; longitude: number }) {
+  opportunityForm.locationLatitude = payload.latitude.toFixed(6)
+  opportunityForm.locationLongitude = payload.longitude.toFixed(6)
+}
+
+function validateCustomLocation() {
+  const address = opportunityForm.locationAddress.trim()
+  const latitude = Number(opportunityForm.locationLatitude)
+  const longitude = Number(opportunityForm.locationLongitude)
+
+  if (!address) {
+    throw new Error('Для своей точки укажите адрес.')
+  }
+
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    throw new Error('Широта должна быть числом от -90 до 90.')
+  }
+
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    throw new Error('Долгота должна быть числом от -180 до 180.')
+  }
+
+  return {
+    address_line: address,
+    latitude,
+    longitude,
+    display_text: opportunityForm.locationDisplayText.trim() || address,
+  }
 }
 
 function getApplicationStatusLabel(status?: EmployerApplicationStatus) {
@@ -405,13 +498,20 @@ function clearIrrelevantOpportunityFields(type: OpportunityType) {
 }
 
 function buildOpportunityPayload(): OpportunityCreateInput {
+  const customLocation = opportunityForm.locationMode === 'custom' ? validateCustomLocation() : undefined
+
+  if (opportunityForm.locationMode === 'catalog' && !opportunityForm.locationId) {
+    throw new Error('Выберите локацию из каталога или переключитесь на свою точку.')
+  }
+
   const sharedPayload = {
     title: opportunityForm.title.trim(),
     short_description: opportunityForm.shortDescription.trim(),
     full_description: opportunityForm.fullDescription.trim(),
     opportunity_type: opportunityForm.opportunityType,
     work_format: opportunityForm.workFormat,
-    location_id: opportunityForm.locationId,
+    location_id: opportunityForm.locationMode === 'catalog' ? opportunityForm.locationId : undefined,
+    location_input: customLocation,
     application_deadline: opportunityForm.applicationDeadline || undefined,
     contacts_info: opportunityForm.contactsInfo.trim() || undefined,
     external_url: opportunityForm.externalUrl.trim() || undefined,
@@ -635,6 +735,23 @@ watch(
     clearIrrelevantOpportunityFields(type)
   },
 )
+
+watch(
+  () => selectedCatalogLocation.value,
+  (location) => {
+    syncLocationFromCatalog(location)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => opportunityForm.locationMode,
+  (mode) => {
+    if (mode === 'catalog') {
+      syncLocationFromCatalog(selectedCatalogLocation.value)
+    }
+  },
+)
 </script>
 
 <template>
@@ -769,12 +886,55 @@ watch(
                   </select>
                 </label>
                 <label class="field">
+                  <span>Способ указания локации</span>
+                  <select v-model="opportunityForm.locationMode">
+                    <option v-for="option in locationModeOptions" :key="option.value" :value="option.value">
+                      {{ option.label }}
+                    </option>
+                  </select>
+                </label>
+                <label v-if="opportunityForm.locationMode === 'catalog'" class="field">
                   <span>Локация из каталога</span>
                   <select v-model="opportunityForm.locationId">
                     <option v-for="location in locations" :key="location.id" :value="location.id">
                       {{ location.display_text || location.id }}
                     </option>
                   </select>
+                  <small v-if="!locations.length" class="field-hint">
+                    Каталог локаций пуст. Переключитесь на режим "Своя точка".
+                  </small>
+                </label>
+                <label v-else class="field">
+                  <span>Адрес</span>
+                  <input
+                    v-model="opportunityForm.locationAddress"
+                    type="text"
+                    placeholder="Город, улица, дом или ориентир"
+                    required
+                  />
+                </label>
+                <label v-if="opportunityForm.locationMode === 'custom'" class="field field-wide">
+                  <span>Подпись точки</span>
+                  <input
+                    v-model="opportunityForm.locationDisplayText"
+                    type="text"
+                    placeholder="Например: Москва, офис компании"
+                  />
+                </label>
+                <label v-if="opportunityForm.locationMode === 'custom'" class="field">
+                  <span>Широта</span>
+                  <input v-model="opportunityForm.locationLatitude" type="number" min="-90" max="90" step="0.000001" required />
+                </label>
+                <label v-if="opportunityForm.locationMode === 'custom'" class="field">
+                  <span>Долгота</span>
+                  <input
+                    v-model="opportunityForm.locationLongitude"
+                    type="number"
+                    min="-180"
+                    max="180"
+                    step="0.000001"
+                    required
+                  />
                 </label>
                 <label class="field">
                   <span>Статус публикации</span>
@@ -802,6 +962,16 @@ watch(
                     required
                   />
                 </label>
+                <div class="field field-wide map-picker-field">
+                  <span>Точка на карте</span>
+                  <MapLibreOpportunityMap
+                    :latitude="previewLocationLatitude"
+                    :longitude="previewLocationLongitude"
+                    :label="previewLocationLabel || 'Точка локации'"
+                    :selectable="opportunityForm.locationMode === 'custom'"
+                    @select="handleLocationSelect"
+                  />
+                </div>
               </div>
             </section>
 
@@ -960,7 +1130,13 @@ watch(
               </div>
               <div>
                 <strong>Место</strong>
-                <p>{{ selectedLocationLabel || 'Локация не указана.' }}</p>
+                <p>
+                  {{
+                    [previewLocationLabel, previewLocationAddress, `Координаты: ${previewLocationLatitude}, ${previewLocationLongitude}`]
+                      .filter(Boolean)
+                      .join(' • ') || 'Локация не указана.'
+                  }}
+                </p>
               </div>
               <div>
                 <strong>Даты</strong>
@@ -1740,6 +1916,10 @@ h1 {
 
 .field-wide {
   grid-column: 1 / -1;
+}
+
+.map-picker-field {
+  align-content: start;
 }
 
 .checkbox-grid {

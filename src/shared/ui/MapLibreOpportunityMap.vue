@@ -7,12 +7,18 @@ const props = defineProps<{
   latitude: number
   longitude: number
   label: string
+  selectable?: boolean
+}>()
+
+const emit = defineEmits<{
+  select: [payload: { latitude: number; longitude: number }]
 }>()
 
 const container = ref<HTMLElement | null>(null)
 const loadError = ref('')
 let map: MapLibreMapLike | null = null
 let marker: MapLibreMarkerLike | null = null
+let isMapClickBound = false
 
 async function renderMap() {
   if (!container.value) {
@@ -49,11 +55,28 @@ async function renderMap() {
       })
 
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+      map.on('load', () => {
+        map?.resize()
+      })
 
       marker = new maplibregl.Marker({ color: '#0a66c2' })
         .setLngLat(center)
         .setPopup(new maplibregl.Popup({ offset: 16 }))
         .addTo(map)
+
+      if (props.selectable && !isMapClickBound) {
+        map.on('click', (event) => {
+          if (!event?.lngLat) {
+            return
+          }
+
+          emit('select', {
+            latitude: event.lngLat.lat,
+            longitude: event.lngLat.lng,
+          })
+        })
+        isMapClickBound = true
+      }
     }
 
     marker?.setLngLat(center)
@@ -87,6 +110,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="map-wrapper">
     <div ref="container" class="map-canvas"></div>
+    <p v-if="selectable" class="map-hint">Кликните по карте, чтобы выбрать точку.</p>
     <p v-if="loadError" class="map-error">{{ loadError }}</p>
   </div>
 </template>
@@ -106,6 +130,12 @@ onBeforeUnmount(() => {
 .map-error {
   margin: 10px 0 0;
   color: var(--danger);
+  font-size: 0.88rem;
+}
+
+.map-hint {
+  margin: 10px 0 0;
+  color: #5f6b7a;
   font-size: 0.88rem;
 }
 </style>

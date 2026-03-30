@@ -45,11 +45,18 @@ interface AvatarUploadResponse {
   updated_at?: string
 }
 
-interface BackendLocation {
+export interface BackendLocation {
   id: string
   address_line?: string
   latitude?: number
   longitude?: number
+  display_text?: string
+}
+
+export interface OpportunityLocationInput {
+  address_line: string
+  latitude: number
+  longitude: number
   display_text?: string
 }
 
@@ -437,7 +444,8 @@ interface OpportunityCreateBaseInput {
   full_description: string
   opportunity_type: OpportunityType
   work_format: WorkFormat
-  location_id: string
+  location_id?: string
+  location_input?: OpportunityLocationInput
   application_deadline?: string
   contacts_info?: string
   external_url?: string

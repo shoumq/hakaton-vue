@@ -247,7 +247,7 @@ watch(
         </div>
       </article>
 
-      <section class="content-grid">
+      <section class="content-grid1">
         <div class="main-column">
           <article class="section-card">
             <div class="section-head">
@@ -369,74 +369,8 @@ watch(
               </ContactRequestsList>
             </article>
 
-            <article class="section-card">
-              <div class="section-head">
-                <div>
-                  <p class="section-label">Исходящие</p>
-                  <h2>Отправленные коннекты</h2>
-                </div>
-              </div>
-
-              <ContactRequestsList
-                :items="outgoingRequests"
-                empty-title="Исходящих запросов нет"
-                empty-text="Отправленные вами запросы появятся здесь."
-              >
-                <template #actions="{ item }">
-                  <RouterLink
-                    :to="`/profiles/students/${item.userId}`"
-                    class="ghost-button"
-                    @click="savePreview(item.userId, item.displayName, item.avatarUrl, item.headline)"
-                  >
-                    Профиль
-                  </RouterLink>
-                  <button
-                    v-if="item.status === 'pending'"
-                    class="ghost-button"
-                    type="button"
-                    :disabled="network.updatingByRequestId.value[item.id]"
-                    @click="handleRequestAction(() => network.cancelRequest(item.id), 'Запрос отменён.')"
-                  >
-                    {{ network.updatingByRequestId.value[item.id] ? 'Сохраняем...' : 'Отменить' }}
-                  </button>
-                </template>
-              </ContactRequestsList>
-            </article>
           </div>
         </div>
-
-        <aside class="side-column">
-          <article class="section-card compact">
-            <div class="section-head">
-              <div>
-                <p class="section-label">Как добавить</p>
-                <h2>Добавление в контакты</h2>
-              </div>
-            </div>
-            <p class="section-copy">
-              Откройте публичный профиль соискателя и нажмите кнопку <strong>«Добавить в контакты»</strong>.
-            </p>
-            <p class="section-copy">
-              После этого запрос появится в этом разделе, а после принятия пользователь станет доступен в ваших контактах.
-            </p>
-          </article>
-
-          <article class="section-card compact">
-            <div class="section-head">
-              <div>
-                <p class="section-label">Рекомендации</p>
-                <h2>Только action-flow</h2>
-              </div>
-            </div>
-            <p class="section-copy">
-              История рекомендаций пока не выводится отдельной страницей: backend поддерживает создание рекомендации,
-              но ещё не отдаёт список.
-            </p>
-            <p class="section-copy">
-              Рекомендовать соискателя можно прямо из его профиля.
-            </p>
-          </article>
-        </aside>
       </section>
 
       <RecommendationComposer

@@ -23,7 +23,7 @@ defineProps<{
         </div>
         <div class="card-copy">
           <strong>{{ item.displayName }}</strong>
-          <span>{{ item.headline || item.userId }}</span>
+          <span v-if="item.headline">{{ item.headline }}</span>
           <p v-if="item.message">{{ item.message }}</p>
         </div>
       </div>

@@ -8,12 +8,18 @@ export interface MapLibreMarkerLike {
 
 export interface MapLibrePopupLike {}
 
+export interface MapLibreLngLatLike {
+  lat: number
+  lng: number
+}
+
 export interface MapLibreMapLike {
   remove(): void
   resize(): void
   flyTo(options: { center: [number, number]; zoom?: number }): void
   fitBounds(bounds: [[number, number], [number, number]], options?: Record<string, unknown>): void
   addControl(control: unknown, position?: string): void
+  on(event: 'load' | 'click', listener: (event?: { lngLat: MapLibreLngLatLike }) => void): void
 }
 
 export interface MapLibreApi {

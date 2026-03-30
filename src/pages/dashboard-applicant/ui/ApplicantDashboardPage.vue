@@ -246,7 +246,6 @@ onMounted(async () => {
                 <p class="section-label">Профиль</p>
                 <h2>Профиль и настройки</h2>
               </div>
-              <RouterLink to="/profile" class="secondary-button compact-button">Открыть страницу профиля</RouterLink>
             </div>
             <p class="section-copy">
               Редактирование профиля, ссылки, приватность и фото вынесены на отдельную страницу, чтобы кабинет оставался компактным.
@@ -324,7 +323,6 @@ onMounted(async () => {
               >
                 <strong>{{ contact.display_name || 'Контакт без имени' }}</strong>
                 <span>{{ contact.title || contact.message || 'Без описания' }}</span>
-                <span>{{ contact.status || 'pending' }}</span>
               </div>
             </div>
           </article>
