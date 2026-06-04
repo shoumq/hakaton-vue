@@ -11,30 +11,30 @@ defineProps<{
 
 <template>
   <div class="requests-list">
-    <article v-if="!items.length" class="network-card empty-card">
+    <div v-if="!items.length" class="crl-empty">
       <strong>{{ emptyTitle }}</strong>
       <p>{{ emptyText }}</p>
-    </article>
+    </div>
 
-    <article v-for="item in items" :key="item.id" class="network-card">
-      <div class="card-topline">
-        <span class="direction-label">{{ item.direction === 'incoming' ? 'Входящий' : 'Исходящий' }}</span>
+    <article v-for="item in items" :key="item.id" class="crl-card" :class="`crl-card--${item.direction}`">
+      <div class="crl-topline">
+        <span class="crl-direction-pill" :class="`crl-direction-pill--${item.direction}`">
+          {{ item.direction === 'incoming' ? '↓ Входящий' : '↑ Исходящий' }}
+        </span>
         <ConnectionStatusBadge :status="item.status" />
       </div>
-
-      <div class="card-head">
-        <div class="avatar-shell">
-          <img v-if="item.avatarUrl" :src="item.avatarUrl" :alt="item.displayName" class="avatar-image" />
-          <span v-else class="avatar-fallback">{{ item.displayName.slice(0, 2).toUpperCase() }}</span>
+      <div class="crl-person">
+        <div class="crl-avatar">
+          <img v-if="item.avatarUrl" :src="item.avatarUrl" :alt="item.displayName" class="crl-avatar-img" />
+          <span v-else class="crl-avatar-fallback">{{ item.displayName.slice(0, 2).toUpperCase() }}</span>
         </div>
-        <div class="card-copy">
+        <div class="crl-copy">
           <strong>{{ item.displayName }}</strong>
           <span v-if="item.headline">{{ item.headline }}</span>
-          <p v-if="item.message">{{ item.message }}</p>
+          <p v-if="item.message" class="crl-message">«{{ item.message }}»</p>
         </div>
       </div>
-
-      <div class="card-actions">
+      <div class="crl-actions">
         <slot name="actions" :item="item" />
       </div>
     </article>
@@ -44,81 +44,153 @@ defineProps<{
 <style scoped>
 .requests-list {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
-.network-card {
+.crl-empty {
+  padding: 20px;
+  border: 1.5px dashed #e2e8f0;
+  border-radius: 12px;
   display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.9);
+  gap: 4px;
+  color: var(--muted);
 }
 
-.empty-card p {
+.crl-empty strong {
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.crl-empty p {
   margin: 0;
-  color: #5f6b7a;
+  font-size: 0.8rem;
+  color: var(--border-strong);
 }
 
-.card-topline,
-.card-actions {
+.crl-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #f1f5f9;
+  border-left-width: 3px;
+  border-radius: 12px;
+  background: var(--surface-strong);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.crl-card:hover { background: var(--surface); }
+
+.crl-card--incoming {
+  border-left-color: #2563eb;
+}
+
+.crl-card--outgoing {
+  border-left-color: var(--border-strong);
+}
+
+.crl-topline {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
 }
 
-.direction-label {
-  color: #627087;
-  font-size: 0.76rem;
+.crl-direction-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: 0.67rem;
   font-weight: 700;
   text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.card-head {
+.crl-direction-pill--incoming {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.crl-direction-pill--outgoing {
+  background: var(--surface-strong);
+  color: var(--muted);
+}
+
+.crl-person {
   display: flex;
-  gap: 12px;
-  align-items: start;
+  gap: 10px;
+  align-items: center;
 }
 
-.avatar-shell {
-  width: 48px;
-  height: 48px;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid #d7dee7;
+.crl-avatar {
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
-  background: #eef3f8;
+  overflow: hidden;
+  flex-shrink: 0;
 }
 
-.avatar-image {
+.crl-avatar-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.avatar-fallback {
-  color: #24456b;
-  font-size: 0.82rem;
+.crl-avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  color: #fff;
+  font-size: 0.68rem;
   font-weight: 700;
 }
 
-.card-copy {
+.crl-copy {
   display: grid;
-  gap: 4px;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
 }
 
-.card-copy strong {
-  color: #162033;
+.crl-copy strong {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.card-copy span,
-.card-copy p {
+.crl-copy span {
+  font-size: 0.76rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crl-message {
   margin: 0;
-  color: #5f6b7a;
-  line-height: 1.45;
+  font-size: 0.76rem;
+  color: #7c8ea6;
+  font-style: italic;
 }
+
+.crl-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+</style>
+
+<style scoped>
+:global(.dark) .crl-card--incoming { border-left-color: var(--accent); }
+:global(.dark) .crl-direction-pill--incoming { background: #0f1e38; color: #60a5fa; }
+:global(.dark) .crl-copy strong { color: var(--text); }
+:global(.dark) .crl-copy span, :global(.dark) .crl-message { color: var(--muted); }
 </style>

@@ -313,9 +313,9 @@ onMounted(loadNotifications)
 .notification-card,
 .invitation-card,
 .status-banner {
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--surface);
   box-shadow: 0 10px 22px rgba(15, 23, 42, 0.045);
 }
 
@@ -350,7 +350,7 @@ onMounted(loadNotifications)
 h1,
 h2 {
   margin: 0;
-  color: #162033;
+  color: var(--text);
   font-family: var(--font-heading);
 }
 
@@ -368,7 +368,7 @@ h2 {
 .notification-date,
 .invitation-detail span {
   margin: 0;
-  color: #5f6b7a;
+  color: var(--muted);
   line-height: 1.55;
 }
 
@@ -387,8 +387,8 @@ h2 {
 
 .filter-button,
 .secondary-button {
-  border: 1px solid #d7dee7;
-  background: #fff;
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: #2952cc;
 }
 
@@ -442,13 +442,13 @@ h2 {
   display: grid;
   gap: 5px;
   padding: 11px 12px;
-  border: 1px solid #e4eaf1;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fafbfd;
+  background: var(--surface-strong);
 }
 
 .invitation-detail strong {
-  color: #162033;
+  color: var(--text);
   line-height: 1.4;
 }
 
@@ -479,4 +479,8 @@ h2 {
     grid-template-columns: 1fr;
   }
 }
+</style>
+
+<style scoped>
+:global(.dark) .notifications-page, :global(.dark) [class*="notif-"] { background: var(--surface); border-color: var(--border); color: var(--text); }
 </style>

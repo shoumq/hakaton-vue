@@ -2,15 +2,19 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import LucideBell from '~icons/lucide/bell'
+import LucideMoon from '~icons/lucide/moon'
+import LucideSun from '~icons/lucide/sun'
 
 import { useSession } from '@/features/session/model/session'
-import { fetchNotifications, getApiErrorMessage } from '@/shared/api'
+import { useTheme } from '@/shared/lib/theme'
+import { fetchNotifications, markAllNotificationsRead, markNotificationRead, getApiErrorMessage } from '@/shared/api'
 import type { NotificationDto } from '@/shared/api'
 import { formatDate } from '@/shared/lib/formatters'
 
 const route = useRoute()
 const router = useRouter()
 const session = useSession()
+const { isDark, toggleTheme } = useTheme()
 const notifications = ref<NotificationDto[]>([])
 const isNotificationsOpen = ref(false)
 const isNotificationsLoading = ref(false)
@@ -57,11 +61,28 @@ async function loadNotifications() {
   }
 }
 
+function markAllReadLocally() {
+  notifications.value = notifications.value.map((n) => ({ ...n, is_read: true }))
+}
+
+function markOneReadLocally(id: string) {
+  notifications.value = notifications.value.map((n) =>
+    n.id === id ? { ...n, is_read: true } : n,
+  )
+}
+
 function toggleNotifications() {
   isNotificationsOpen.value = !isNotificationsOpen.value
 
-  if (isNotificationsOpen.value && !notifications.value.length && !isNotificationsLoading.value) {
-    void loadNotifications()
+  if (isNotificationsOpen.value) {
+    if (!notifications.value.length && !isNotificationsLoading.value) {
+      void loadNotifications()
+    }
+    // mark all as read when dropdown opens (fire-and-forget)
+    if (unreadCount.value > 0) {
+      markAllReadLocally()
+      void markAllNotificationsRead()
+    }
   }
 }
 
@@ -79,6 +100,13 @@ function getNotificationLink(notification: NotificationDto) {
   }
 
   return '/notifications'
+}
+
+function handleNotificationClick(notification: NotificationDto) {
+  if (!notification.is_read) {
+    markOneReadLocally(notification.id)
+    void markNotificationRead(notification.id)
+  }
 }
 
 watch(
@@ -129,6 +157,11 @@ onBeforeUnmount(() => {
       <RouterLink v-if="session.isAuthenticated.value" to="/chats" class="nav-link">
         Чаты
       </RouterLink>
+      <button class="nav-link icon-button theme-toggle" type="button" :title="isDark ? 'Светлая тема' : 'Тёмная тема'" @click="toggleTheme">
+        <LucideSun v-if="isDark" class="theme-icon" />
+        <LucideMoon v-else class="theme-icon" />
+      </button>
+
       <div v-if="session.isAuthenticated.value" class="notifications-menu-shell">
         <button class="nav-link icon-button" type="button" @click.stop="toggleNotifications">
           <LucideBell class="bell-icon" aria-hidden="true" />
@@ -151,6 +184,8 @@ onBeforeUnmount(() => {
               :key="notification.id"
               :to="getNotificationLink(notification)"
               class="dropdown-item"
+              :class="{ 'dropdown-item--unread': !notification.is_read }"
+              @click="handleNotificationClick(notification)"
             >
               <div class="dropdown-item-head">
                 <strong>
@@ -193,7 +228,7 @@ onBeforeUnmount(() => {
   gap: 24px;
   padding: 12px 24px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--header-bg);
   backdrop-filter: blur(12px);
   box-shadow: var(--shadow-soft);
 }
@@ -296,7 +331,7 @@ onBeforeUnmount(() => {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--surface);
   box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
 }
 
@@ -336,13 +371,32 @@ onBeforeUnmount(() => {
 }
 
 .dropdown-item {
+  position: relative;
   display: grid;
   gap: 6px;
-  padding: 10px 11px;
-  border: 1px solid #e4eaf1;
+  padding: 10px 11px 10px 22px;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fafbfd;
+  background: var(--surface-strong);
   text-decoration: none;
+  transition: background 0.15s;
+}
+
+.dropdown-item--unread {
+  background: var(--surface-blue);
+  border-color: var(--border-blue);
+}
+
+.dropdown-item--unread::before {
+  content: '';
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 .dropdown-item p,
@@ -371,6 +425,65 @@ onBeforeUnmount(() => {
 
 .button-link {
   cursor: pointer;
+}
+
+.theme-icon {
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+  flex: 0 0 auto;
+}
+
+/* Dark mode overrides for the header itself */
+:global(.dark) .platform-header {
+  border-color: var(--border);
+}
+
+:global(.dark) .brand-link { color: var(--text); }
+:global(.dark) .brand-copy  { color: var(--muted); }
+
+:global(.dark) .nav-link {
+  border-color: rgba(51, 65, 85, 0.7);
+  background: rgba(30, 41, 59, 0.8);
+  color: #cbd5e1;
+}
+
+:global(.dark) .nav-link:hover {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(37, 51, 74, 0.9);
+  color: #e2e8f0;
+}
+
+:global(.dark) .nav-link.accent {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+:global(.dark) .nav-link.accent:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+:global(.dark) .notifications-dropdown {
+  background: rgba(20, 30, 48, 0.98);
+  border-color: var(--border);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.5);
+}
+
+:global(.dark) .dropdown-item {
+  background: rgba(30, 41, 59, 0.8);
+  border-color: var(--border);
+}
+
+:global(.dark) .dropdown-head strong,
+:global(.dark) .dropdown-item-head strong {
+  color: #e2e8f0;
+}
+
+:global(.dark) .dropdown-item p,
+:global(.dark) .dropdown-item-head span {
+  color: var(--border-strong);
 }
 
 @media (max-width: 900px) {

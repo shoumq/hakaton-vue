@@ -4,9 +4,11 @@ import type { Opportunity, OpportunityLocation, OpportunityType, WorkFormat } fr
 import type { PlatformUser, UserRole } from '@/entities/user/model/types'
 import { employmentTags, levelTags } from '@/shared/config/tags'
 
-import { api } from './base'
+import { api, aiApi } from './base'
+import { getCatalog } from '@/shared/lib/catalog-cache'
 
 export { api, getApiErrorMessage, setApiAuthToken } from './base'
+export { getCatalog, invalidateCatalog } from '@/shared/lib/catalog-cache'
 
 type AuthRole = Exclude<UserRole, 'guest'>
 
@@ -75,6 +77,9 @@ interface BackendOpportunity {
   expires_at?: string
   salary_min?: number
   salary_max?: number
+  salary_currency?: string
+  is_salary_visible?: boolean
+  vacancy_level?: string
   contacts_info?: string
   status?: string
   company_name?: string
@@ -83,6 +88,26 @@ interface BackendOpportunity {
   applications_count?: number
   favorites_count?: number
   views_count?: number
+}
+
+export interface RecommendationOpportunityDto {
+  id: string
+  title: string
+  short_description?: string
+  opportunity_type?: string
+  work_format?: string
+  vacancy_level?: string
+  employment_type?: string
+  salary_min?: number
+  salary_max?: number
+  salary_currency?: string
+  is_salary_visible?: boolean
+  status?: string
+  company_id?: string
+  company_name?: string
+  company_avatar_url?: string
+  tags?: string[]
+  location?: string
 }
 
 export interface BackendTag {
@@ -187,17 +212,45 @@ export interface ApplicationDto {
 
 export interface ResumeDto {
   id: string
+  student_user_id?: string
   title?: string
   summary?: string
+  experience_text?: string
+  education_text?: string
   is_primary?: boolean
   created_at?: string
+  updated_at?: string
+}
+
+export interface ResumeCreateInput {
+  title: string
+  summary?: string
+  experience_text?: string
+  education_text?: string
 }
 
 export interface PortfolioProjectDto {
   id: string
+  student_user_id?: string
   title?: string
   description?: string
   project_url?: string
+  repository_url?: string
+  demo_url?: string
+  started_at?: string
+  finished_at?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface PortfolioProjectCreateInput {
+  title: string
+  description?: string
+  project_url?: string
+  repository_url?: string
+  demo_url?: string
+  started_at?: string
+  finished_at?: string
 }
 
 export type ContactRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled'
@@ -225,8 +278,15 @@ export interface ContactDto {
   updated_at?: string
   direction?: 'incoming' | 'outgoing'
   is_incoming?: boolean
-  requester_user_id?: string
+  // flat fields from backend contact_requests query
+  sender_user_id?: string
   receiver_user_id?: string
+  sender_name?: string
+  receiver_name?: string
+  sender_avatar_url?: string
+  receiver_avatar_url?: string
+  // legacy / alternative field names
+  requester_user_id?: string
   from_user_id?: string
   to_user_id?: string
   user?: ContactUserSummaryDto | null
@@ -282,6 +342,48 @@ export interface ContactRequestCreateInput {
 
 export interface ContactRequestUpdateInput {
   status: ContactRequestStatus
+}
+
+export interface NetworkingUserDto {
+  id: string
+  email?: string
+  display_name?: string
+  avatar_url?: string
+  status?: string
+  is_online?: boolean
+  last_seen_at?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface NetworkingContactRequestDto {
+  id: string
+  sender_user_id?: string
+  receiver_user_id?: string
+  sender_name?: string
+  receiver_name?: string
+  sender_avatar_url?: string
+  receiver_avatar_url?: string
+  direction?: 'incoming' | 'outgoing'
+  message?: string
+  status?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface NetworkingSuggestedPersonDto {
+  user: NetworkingUserDto
+  mutual_contacts_count: number
+  reason: string
+  source: 'mutual_contacts' | 'student_profile' | string
+}
+
+export interface NetworkingDto {
+  user_id: string
+  contacts: NetworkingUserDto[]
+  incoming_requests: NetworkingContactRequestDto[]
+  outgoing_requests: NetworkingContactRequestDto[]
+  suggested_people: NetworkingSuggestedPersonDto[]
 }
 
 export interface ChatMessageDto {
@@ -718,7 +820,7 @@ export async function uploadEmployerCompanyAvatar(file: File) {
   })
 }
 
-export async function fetchPublicCatalog(): Promise<PublicCatalog> {
+async function _fetchPublicCatalog(): Promise<PublicCatalog> {
   const [opportunitiesRaw, tagsRaw, locationsRaw] = await Promise.all([
     request<BackendOpportunity[]>({ method: 'get', url: '/opportunities' }),
     request<BackendTag[]>({ method: 'get', url: '/tags' }),
@@ -736,6 +838,10 @@ export async function fetchPublicCatalog(): Promise<PublicCatalog> {
     tags,
     locations,
   }
+}
+
+export function fetchPublicCatalog(): Promise<PublicCatalog> {
+  return getCatalog(_fetchPublicCatalog)
 }
 
 export async function fetchStudentProfile() {
@@ -855,6 +961,79 @@ export async function fetchResumes() {
   return asArray<ResumeDto>(data)
 }
 
+export async function createResume(payload: ResumeCreateInput) {
+  return request<ResumeDto>({
+    method: 'post',
+    url: '/me/resumes',
+    data: payload,
+  })
+}
+
+export async function setResumePrimary(id: string) {
+  return request<ResumeDto>({
+    method: 'patch',
+    url: `/me/resumes/${id}/primary`,
+  })
+}
+
+export async function fetchAllCompanies() {
+  const data = await request<EmployerCompanyDto[]>({
+    method: 'get',
+    url: '/companies',
+  })
+  return asArray<EmployerCompanyDto>(data)
+}
+
+export interface PublicResumeDto extends ResumeDto {
+  work_experiences?: WorkExperienceDto[]
+}
+
+export async function fetchPublicResumes(userId: string) {
+  const data = await request<PublicResumeDto[]>({
+    method: 'get',
+    url: `/students/${userId}/resumes`,
+  })
+  return asArray<PublicResumeDto>(data)
+}
+
+export async function fetchPublicResumeById(userId: string, resumeId: string) {
+  const data = await request<{ resume: ResumeDto; work_experiences?: WorkExperienceDto[] } | PublicResumeDto>({
+    method: 'get',
+    url: `/students/${userId}/resumes/${resumeId}`,
+  })
+
+  // Backend wraps response as { resume: {...}, work_experiences: [...] }
+  if (data && typeof data === 'object' && 'resume' in data && !('title' in data)) {
+    const wrapped = data as { resume: ResumeDto; work_experiences?: WorkExperienceDto[] }
+    return {
+      ...wrapped.resume,
+      work_experiences: wrapped.work_experiences ?? [],
+    } as PublicResumeDto
+  }
+
+  return data as PublicResumeDto
+}
+
+export async function fetchRecommendationOpportunities(params?: {
+  search?: string
+  tag?: string
+  work_format?: string
+  salary_from?: number
+}) {
+  const query = params
+    ? Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== ''))
+    : undefined
+
+  const data = await request<unknown>({
+    method: 'get',
+    url: '/me/recommendation-opportunities',
+    params: query,
+  })
+
+  // unwrap handles { status, data: [...] } → array; pickArray handles residual nesting
+  return pickArray<RecommendationOpportunityDto>(data, ['data', 'opportunities', 'items', 'results'])
+}
+
 export async function fetchPortfolioProjects() {
   const data = await request<PortfolioProjectDto[]>({
     method: 'get',
@@ -862,6 +1041,21 @@ export async function fetchPortfolioProjects() {
   })
 
   return asArray<PortfolioProjectDto>(data)
+}
+
+export async function createPortfolioProject(payload: PortfolioProjectCreateInput) {
+  return request<PortfolioProjectDto>({
+    method: 'post',
+    url: '/me/portfolio-projects',
+    data: payload,
+  })
+}
+
+export async function fetchNetworking() {
+  return request<NetworkingDto>({
+    method: 'get',
+    url: '/me/networking',
+  })
 }
 
 export async function fetchContacts() {
@@ -914,6 +1108,20 @@ export async function fetchNotifications() {
   })
 
   return asArray<NotificationDto>(data)
+}
+
+export async function markAllNotificationsRead() {
+  return request<void>({
+    method: 'patch',
+    url: '/me/notifications/read',
+  })
+}
+
+export async function markNotificationRead(id: string) {
+  return request<void>({
+    method: 'patch',
+    url: `/me/notifications/${id}/read`,
+  })
 }
 
 export async function fetchMyChats() {
@@ -1042,6 +1250,111 @@ export async function createEmployerOpportunity(payload: OpportunityCreateInput)
     data: payload,
   })
 }
+
+export interface OpportunityAnalyticsDto {
+  opportunity_id: string
+  model: string
+  analysis: string
+  generated_at: string
+}
+
+async function aiRequest<T>(config: Parameters<typeof api.request>[0]) {
+  const response = await aiApi.request<ApiEnvelope<T> | T>(config)
+  return unwrap(response.data)
+}
+
+export async function fetchOpportunityAnalytics(opportunityId: string) {
+  return aiRequest<OpportunityAnalyticsDto>({
+    method: 'post',
+    url: `/employer/opportunities/${opportunityId}/analytics`,
+  })
+}
+
+export async function fetchOpportunityAnalyticsPublic(opportunityId: string) {
+  return aiRequest<OpportunityAnalyticsDto>({
+    method: 'post',
+    url: `/opportunities/${opportunityId}/analytics`,
+  })
+}
+
+// ── Work Experience ──────────────────────────────────────────────────────────
+
+export interface WorkExperienceCompanyDto {
+  id: string
+  legal_name?: string
+  brand_name?: string
+  avatar_url?: string
+  website_url?: string
+}
+
+export interface WorkExperienceDto {
+  id: string
+  resume_id: string
+  company_id?: string
+  company?: WorkExperienceCompanyDto
+  company_name?: string
+  position_title: string
+  started_at: string
+  finished_at?: string
+  description?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkExperienceInput {
+  company_id?: string
+  company_name?: string
+  position_title: string
+  started_at: string
+  finished_at?: string
+  description?: string
+}
+
+export async function fetchWorkExperiences(resumeId: string) {
+  const data = await request<WorkExperienceDto[]>({
+    method: 'get',
+    url: `/me/resumes/${resumeId}/work-experiences`,
+  })
+  return asArray<WorkExperienceDto>(data)
+}
+
+export async function createWorkExperience(resumeId: string, payload: WorkExperienceInput) {
+  return request<WorkExperienceDto>({
+    method: 'post',
+    url: `/me/resumes/${resumeId}/work-experiences`,
+    data: payload,
+  })
+}
+
+export async function updateWorkExperience(
+  resumeId: string,
+  experienceId: string,
+  payload: Partial<WorkExperienceInput>,
+) {
+  return request<WorkExperienceDto>({
+    method: 'patch',
+    url: `/me/resumes/${resumeId}/work-experiences/${experienceId}`,
+    data: payload,
+  })
+}
+
+export async function deleteWorkExperience(resumeId: string, experienceId: string) {
+  return request<void>({
+    method: 'delete',
+    url: `/me/resumes/${resumeId}/work-experiences/${experienceId}`,
+  })
+}
+
+export async function searchCompanies(query: string) {
+  const data = await request<EmployerCompanyDto[]>({
+    method: 'get',
+    url: '/companies',
+    params: { search: query },
+  })
+  return asArray<EmployerCompanyDto>(data)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function fetchCuratorModerationQueue() {
   const data = await request<ModerationQueueItemDto[]>({

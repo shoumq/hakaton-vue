@@ -1,20 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { useSession } from '@/features/session/model/session'
-import { ChatsPage } from '@/pages/chats'
-import { ContactsPage } from '@/pages/contacts'
-import { CuratorDashboardPage } from '@/pages/dashboard-curator'
-import { CuratorCompanyDetailsPage } from '@/pages/curator-company-details'
-import { EmployerDashboardPage } from '@/pages/dashboard-employer'
-import { ApplicantDashboardPage } from '@/pages/dashboard-applicant'
-import { HomePage } from '@/pages/home'
-import { LoginPage } from '@/pages/login'
-import { NotificationsPage } from '@/pages/notifications'
-import { OpportunityDetailsPage } from '@/pages/opportunity-details'
-import { ProfileSettingsPage } from '@/pages/profile-settings'
-import { PublicCompanyProfilePage } from '@/pages/public-company-profile'
-import { PublicStudentProfilePage } from '@/pages/public-student-profile'
-import { RegisterPage } from '@/pages/register'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -22,81 +8,93 @@ const router = createRouter({
     {
       path: '/',
       name: 'home',
-      component: HomePage,
+      component: () => import('@/pages/home/ui/HomePage.vue'),
     },
     {
       path: '/login',
       name: 'login',
-      component: LoginPage,
+      component: () => import('@/pages/login/ui/LoginPage.vue'),
     },
     {
       path: '/register',
       name: 'register',
-      component: RegisterPage,
+      component: () => import('@/pages/register/ui/RegisterPage.vue'),
     },
     {
       path: '/opportunities/:id',
       name: 'opportunity-details',
-      component: OpportunityDetailsPage,
+      component: () => import('@/pages/opportunity-details/ui/OpportunityDetailsPage.vue'),
     },
     {
       path: '/profile',
       name: 'profile-settings',
-      component: ProfileSettingsPage,
+      component: () => import('@/pages/profile-settings/ui/ProfileSettingsPage.vue'),
       meta: { requiresAuth: true },
     },
     {
       path: '/profiles/students/:id',
       name: 'public-student-profile',
-      component: PublicStudentProfilePage,
+      component: () => import('@/pages/public-student-profile/ui/PublicStudentProfilePage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/profiles/students/:userId/resumes/:resumeId',
+      name: 'public-resume',
+      component: () => import('@/pages/public-resume/ui/PublicResumePage.vue'),
       meta: { requiresAuth: true },
     },
     {
       path: '/profiles/companies/:id',
       name: 'public-company-profile',
-      component: PublicCompanyProfilePage,
+      component: () => import('@/pages/public-company-profile/ui/PublicCompanyProfilePage.vue'),
       meta: { requiresAuth: true },
     },
     {
       path: '/notifications',
       name: 'notifications',
-      component: NotificationsPage,
+      component: () => import('@/pages/notifications/ui/NotificationsPage.vue'),
       meta: { requiresAuth: true },
     },
     {
       path: '/chats/:id?',
       name: 'chats',
-      component: ChatsPage,
+      component: () => import('@/pages/chats/ui/ChatsPage.vue'),
       meta: { requiresAuth: true },
     },
     {
       path: '/contacts',
       name: 'contacts',
-      component: ContactsPage,
+      component: () => import('@/pages/contacts/ui/ContactsPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/networking',
+      name: 'networking',
+      component: () => import('@/pages/networking/ui/NetworkingPage.vue'),
       meta: { requiresAuth: true },
     },
     {
       path: '/dashboard/applicant',
       name: 'dashboard-applicant',
-      component: ApplicantDashboardPage,
+      component: () => import('@/pages/dashboard-applicant/ui/ApplicantDashboardPage.vue'),
       meta: { requiresRole: 'student' },
     },
     {
       path: '/dashboard/employer',
       name: 'dashboard-employer',
-      component: EmployerDashboardPage,
+      component: () => import('@/pages/dashboard-employer/ui/EmployerDashboardPage.vue'),
       meta: { requiresRole: 'employer' },
     },
     {
       path: '/dashboard/curator',
       name: 'dashboard-curator',
-      component: CuratorDashboardPage,
+      component: () => import('@/pages/dashboard-curator/ui/CuratorDashboardPage.vue'),
       meta: { requiresRole: 'curator' },
     },
     {
       path: '/dashboard/curator/companies/:id',
       name: 'curator-company-details',
-      component: CuratorCompanyDetailsPage,
+      component: () => import('@/pages/curator-company-details/ui/CuratorCompanyDetailsPage.vue'),
       meta: { requiresRole: 'curator' },
     },
   ],
@@ -109,17 +107,9 @@ router.beforeEach(async (to) => {
 
   await session.restoreSession()
 
-  if (!requiresAuth) {
-    return true
-  }
-
-  if (!session.isAuthenticated.value) {
-    return '/login'
-  }
-
-  if (requiredRole && session.role.value !== requiredRole) {
-    return '/'
-  }
+  if (!requiresAuth) return true
+  if (!session.isAuthenticated.value) return '/login'
+  if (requiredRole && session.role.value !== requiredRole) return '/'
 
   return true
 })

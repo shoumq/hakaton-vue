@@ -19,6 +19,7 @@ const loadError = ref('')
 let map: MapLibreMapLike | null = null
 let marker: MapLibreMarkerLike | null = null
 let isMapClickBound = false
+let isDragEndBound = false
 
 async function renderMap() {
   if (!container.value) {
@@ -59,23 +60,27 @@ async function renderMap() {
         map?.resize()
       })
 
-      marker = new maplibregl.Marker({ color: '#0a66c2' })
+      marker = new maplibregl.Marker({ color: '#0a66c2', draggable: props.selectable })
         .setLngLat(center)
         .setPopup(new maplibregl.Popup({ offset: 16 }))
         .addTo(map)
+    }
 
-      if (props.selectable && !isMapClickBound) {
+    if (props.selectable) {
+      if (!isMapClickBound) {
         map.on('click', (event) => {
-          if (!event?.lngLat) {
-            return
-          }
-
-          emit('select', {
-            latitude: event.lngLat.lat,
-            longitude: event.lngLat.lng,
-          })
+          if (!event?.lngLat) return
+          emit('select', { latitude: event.lngLat.lat, longitude: event.lngLat.lng })
         })
         isMapClickBound = true
+      }
+
+      if (!isDragEndBound && marker) {
+        marker.on('dragend', () => {
+          const lngLat = marker!.getLngLat()
+          emit('select', { latitude: lngLat.lat, longitude: lngLat.lng })
+        })
+        isDragEndBound = true
       }
     }
 
@@ -104,6 +109,8 @@ onBeforeUnmount(() => {
   marker = null
   map?.remove()
   map = null
+  isMapClickBound = false
+  isDragEndBound = false
 })
 </script>
 

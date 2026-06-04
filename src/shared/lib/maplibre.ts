@@ -1,16 +1,18 @@
+export interface MapLibreLngLatLike {
+  lat: number
+  lng: number
+}
+
+export interface MapLibrePopupLike {}
+
 export interface MapLibreMarkerLike {
   remove(): void
   setLngLat(coords: [number, number]): MapLibreMarkerLike
   setPopup(popup: MapLibrePopupLike): MapLibreMarkerLike
   addTo(map: MapLibreMapLike): MapLibreMarkerLike
   getElement(): HTMLElement
-}
-
-export interface MapLibrePopupLike {}
-
-export interface MapLibreLngLatLike {
-  lat: number
-  lng: number
+  getLngLat(): MapLibreLngLatLike
+  on(event: 'dragend' | 'drag' | 'dragstart', listener: () => void): MapLibreMarkerLike
 }
 
 export interface MapLibreMapLike {

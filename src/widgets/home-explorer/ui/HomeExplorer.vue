@@ -8,6 +8,7 @@ import { useFavorites } from '@/features/favorites/model/favorites'
 import { useOpportunityFilters } from '@/features/opportunity-filter/model/useOpportunityFilters'
 import { fetchPublicCatalog, getApiErrorMessage } from '@/shared/api'
 import { opportunityTypes, technologyTags, workFormats } from '@/shared/config/tags'
+import LucideArrowRight from '~icons/lucide/arrow-right'
 import { formatEmployment, formatMoneyRange, formatOpportunityType, formatWorkFormat, pluralize } from '@/shared/lib/formatters'
 import MapLibreOpportunityCollectionMap from '@/shared/ui/MapLibreOpportunityCollectionMap.vue'
 
@@ -43,6 +44,17 @@ const mapPoints = computed(() =>
   })),
 )
 
+const typeColorMap: Record<string, string> = {
+  vacancy: 'blue',
+  internship: 'green',
+  mentorship: 'purple',
+  event: 'orange',
+}
+
+function typeColor(type: string) {
+  return typeColorMap[type] ?? 'blue'
+}
+
 async function openOpportunity(id: string) {
   await router.push(`/opportunities/${id}`)
 }
@@ -69,704 +81,769 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="explorer">
-    <p v-if="errorMessage" class="status-banner error">{{ errorMessage }}</p>
-    <p v-else-if="isLoading" class="status-banner">Загружаем витрину возможностей...</p>
+  <section class="he-root">
 
-    <section v-if="activeView === 'map'" class="map-shell">
+    <!-- Status -->
+    <div v-if="errorMessage" class="he-status he-status--error">{{ errorMessage }}</div>
+    <div v-else-if="isLoading" class="he-status">
+      <span class="he-spinner"></span> Загружаем возможности…
+    </div>
+
+    <!-- MAP VIEW -->
+    <section v-if="activeView === 'map'" class="he-map-shell">
       <MapLibreOpportunityCollectionMap
-        class="map-surface"
+        class="he-map"
         :points="mapPoints"
         :active-id="hoveredId"
         @hover="hoveredId = $event"
         @select="openOpportunity"
       />
 
-      <div class="map-overlay filters-overlay">
-        <div class="filter-panel">
-          <label class="field">
-            <span>Поиск</span>
-            <input v-model="filters.query" type="text" placeholder="Vue, Python, хакатон, Москва" />
+      <!-- Filter bar -->
+      <div class="he-overlay he-filter-bar">
+        <div class="he-filter-inner">
+          <label class="he-filter-field he-filter-field--wide">
+            <svg class="he-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input v-model="filters.query" type="text" placeholder="Поиск по названию, навыку, городу…" class="he-input he-input--search" />
           </label>
-
-          <label class="field">
-            <span>Навык</span>
-            <select v-model="filters.technology">
-              <option value="all">Все теги</option>
+          <label class="he-filter-field">
+            <select v-model="filters.technology" class="he-input">
+              <option value="all">Все навыки</option>
               <option v-for="tag in availableTechnologyTags" :key="tag" :value="tag">{{ tag }}</option>
             </select>
           </label>
-
-          <label class="field">
-            <span>Формат</span>
-            <select v-model="filters.workFormat">
+          <label class="he-filter-field">
+            <select v-model="filters.workFormat" class="he-input">
               <option value="all">Все форматы</option>
-              <option v-for="format in workFormats" :key="format" :value="format">{{ format }}</option>
+              <option v-for="f in workFormats" :key="f" :value="f">{{ f }}</option>
             </select>
           </label>
-
-          <label class="field">
-            <span>Тип</span>
-            <select v-model="filters.opportunityType">
+          <label class="he-filter-field">
+            <select v-model="filters.opportunityType" class="he-input">
               <option value="all">Все типы</option>
-              <option v-for="type in opportunityTypes" :key="type" :value="type">{{ type }}</option>
+              <option v-for="t in opportunityTypes" :key="t" :value="t">{{ t }}</option>
             </select>
           </label>
-
-          <label class="field">
-            <span>Зарплата от</span>
-            <input v-model.number="filters.salaryFrom" type="number" min="0" step="10000" placeholder="120000" />
+          <label class="he-filter-field">
+            <input v-model.number="filters.salaryFrom" type="number" min="0" step="10000" placeholder="Зарплата от…" class="he-input" />
           </label>
-
-          <button class="ghost-button" type="button" @click="reset">Сбросить</button>
+          <button v-if="activeFilterCount" class="he-reset-btn" type="button" @click="reset">
+            ✕ Сбросить
+          </button>
         </div>
       </div>
 
-      <div class="map-overlay toolbar-overlay">
-        <div class="toolbar-card">
-          <p class="results-copy">
-            Найдено {{ filtered.length }} {{ pluralize(filtered.length, 'возможность', 'возможности', 'возможностей') }}
-          </p>
-
-          <div class="view-switcher">
-            <button
-              type="button"
-              class="view-button active"
-              @click="activeView = 'map'"
-            >
-              Карта
-            </button>
-            <button
-              type="button"
-              class="view-button"
-              @click="activeView = 'list'"
-            >
-              Лента
-            </button>
-          </div>
+      <!-- Toolbar -->
+      <div class="he-overlay he-toolbar">
+        <span class="he-count-label">
+          {{ filtered.length }} {{ pluralize(filtered.length, 'возможность', 'возможности', 'возможностей') }}
+        </span>
+        <div class="he-view-switch">
+          <button type="button" class="he-view-btn he-view-btn--active" @click="activeView = 'map'">🗺 Карта</button>
+          <button type="button" class="he-view-btn" @click="activeView = 'list'">☰ Лента</button>
         </div>
       </div>
 
-      <aside class="map-overlay details-overlay">
-        <OpportunityCard
-          v-if="hoveredOpportunity"
-          :opportunity="hoveredOpportunity"
-          compact
-        />
-        <div v-else class="hover-placeholder">
-          Наведи на маркер, чтобы увидеть карточку возможности.
+      <!-- Hover card -->
+      <aside class="he-overlay he-hover-card-wrap">
+        <OpportunityCard v-if="hoveredOpportunity" :opportunity="hoveredOpportunity" compact />
+        <div v-else class="he-hover-placeholder">
+          <span>📍</span>
+          <p>Наведите на маркер, чтобы увидеть карточку возможности</p>
         </div>
       </aside>
 
-      <div class="map-overlay legend-overlay">
-        <div class="map-legend">
-          <span><i class="legend-dot"></i> стандартный маркер</span>
-          <span><i class="legend-dot favorite"></i> в избранном</span>
+      <!-- Legend -->
+      <div class="he-overlay he-legend">
+        <span><i class="he-dot"></i> Стандартный</span>
+        <span><i class="he-dot he-dot--fav"></i> В избранном</span>
+      </div>
+    </section>
+
+    <!-- LIST VIEW -->
+    <section v-else class="he-list-shell">
+      <div class="he-list-layout">
+
+        <!-- Sidebar -->
+        <aside class="he-sidebar">
+          <div class="he-sidebar-card">
+            <p class="he-sidebar-kicker">Фильтры</p>
+            <div class="he-sidebar-fields">
+              <label class="he-sidebar-field">
+                <span>Поиск</span>
+                <div class="he-search-wrap">
+                  <svg class="he-search-icon he-search-icon--inside" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                  <input v-model="filters.query" type="text" placeholder="Название, город, навык…" class="he-input he-input--icon" />
+                </div>
+              </label>
+              <label class="he-sidebar-field">
+                <span>Тип</span>
+                <select v-model="filters.opportunityType" class="he-input">
+                  <option value="all">Все типы</option>
+                  <option v-for="t in opportunityTypes" :key="t" :value="t">{{ t }}</option>
+                </select>
+              </label>
+              <label class="he-sidebar-field">
+                <span>Формат</span>
+                <select v-model="filters.workFormat" class="he-input">
+                  <option value="all">Любой формат</option>
+                  <option v-for="f in workFormats" :key="f" :value="f">{{ f }}</option>
+                </select>
+              </label>
+              <label class="he-sidebar-field">
+                <span>Навык / технология</span>
+                <select v-model="filters.technology" class="he-input">
+                  <option value="all">Все навыки</option>
+                  <option v-for="tag in availableTechnologyTags" :key="tag" :value="tag">{{ tag }}</option>
+                </select>
+              </label>
+              <label class="he-sidebar-field">
+                <span>Зарплата от, ₽</span>
+                <input v-model.number="filters.salaryFrom" type="number" min="0" step="10000" placeholder="100 000" class="he-input" />
+              </label>
+            </div>
+            <button v-if="activeFilterCount" class="he-reset-btn he-reset-btn--full" type="button" @click="reset">
+              ✕ Сбросить {{ activeFilterCount }} {{ pluralize(activeFilterCount, 'фильтр', 'фильтра', 'фильтров') }}
+            </button>
+          </div>
+
+          <!-- Stats -->
+          <div class="he-stats-card">
+            <div class="he-stat">
+              <span>Найдено</span>
+              <strong>{{ filtered.length }}</strong>
+            </div>
+            <div class="he-stat">
+              <span>Фильтров</span>
+              <strong>{{ activeFilterCount }}</strong>
+            </div>
+            <div class="he-stat">
+              <span>Избранное</span>
+              <strong>{{ opportunities.filter((o) => favorites.has(o.id)).length }}</strong>
+            </div>
+          </div>
+
+          <!-- View switch -->
+          <div class="he-view-card">
+            <button type="button" class="he-view-btn" @click="activeView = 'map'">🗺 Карта</button>
+            <button type="button" class="he-view-btn he-view-btn--active" @click="activeView = 'list'">☰ Лента</button>
+          </div>
+        </aside>
+
+        <!-- Feed -->
+        <div class="he-feed">
+          <div class="he-feed-header">
+            <div>
+              <p class="he-feed-kicker">Каталог</p>
+              <h2 class="he-feed-title">Возможности</h2>
+            </div>
+            <span class="he-feed-count">{{ filtered.length }} {{ pluralize(filtered.length, 'позиция', 'позиции', 'позиций') }}</span>
+          </div>
+
+          <div v-if="!filtered.length" class="he-feed-empty">
+            <span class="he-feed-empty-icon">🔍</span>
+            <strong>Ничего не найдено</strong>
+            <p>Попробуйте изменить или сбросить фильтры.</p>
+            <button class="he-reset-btn" type="button" @click="reset">Сбросить фильтры</button>
+          </div>
+
+          <div v-else class="he-feed-list">
+            <article
+              v-for="opportunity in filtered"
+              :key="opportunity.id"
+              class="he-card"
+            >
+              <!-- Company avatar -->
+              <RouterLink :to="`/opportunities/${opportunity.id}`" class="he-card-avatar">
+                <img v-if="opportunity.companyAvatarUrl" :src="opportunity.companyAvatarUrl" :alt="opportunity.companyName" />
+                <span v-else>{{ opportunity.companyName.slice(0,2).toUpperCase() }}</span>
+              </RouterLink>
+
+              <div class="he-card-body">
+                <!-- Top chips -->
+                <div class="he-card-chips">
+                  <span class="he-chip" :class="`he-chip--${typeColor(opportunity.type)}`">{{ formatOpportunityType(opportunity.type) }}</span>
+                  <span class="he-chip he-chip--grey">{{ formatWorkFormat(opportunity.workFormat) }}</span>
+                  <span class="he-chip he-chip--grey">{{ formatEmployment(opportunity.employment) }}</span>
+                </div>
+
+                <!-- Company + title -->
+                <p class="he-card-company">{{ opportunity.companyName }}</p>
+                <h3 class="he-card-title">
+                  <RouterLink :to="`/opportunities/${opportunity.id}`">{{ opportunity.title }}</RouterLink>
+                </h3>
+                <p class="he-card-summary">{{ opportunity.summary }}</p>
+
+                <!-- Meta row -->
+                <div class="he-card-meta">
+                  <span v-if="opportunity.location.city !== 'Онлайн' || opportunity.workFormat !== 'remote'">📍 {{ opportunity.location.placementLabel }}</span>
+                  <span v-if="formatMoneyRange(opportunity.salaryFrom, opportunity.salaryTo) !== '—'">💰 {{ formatMoneyRange(opportunity.salaryFrom, opportunity.salaryTo) }}</span>
+                  <span v-for="tech in [...opportunity.technologies, ...opportunity.levels].slice(0,3)" :key="tech" class="he-meta-tag">{{ tech }}</span>
+                </div>
+              </div>
+
+              <!-- Action -->
+              <div class="he-card-action">
+                <RouterLink :to="`/opportunities/${opportunity.id}`" class="he-apply-btn">
+                  Подробнее <LucideArrowRight class="he-apply-icon" />
+                </RouterLink>
+              </div>
+            </article>
+          </div>
         </div>
       </div>
     </section>
 
-    <section v-else class="list-shell">
-      <div class="list-layout">
-        <aside class="list-sidebar">
-          <div class="feed-filters feed-card">
-            <label class="field">
-              <span>Поиск</span>
-              <input v-model="filters.query" type="text" placeholder="Vue, Python, хакатон, Москва" />
-            </label>
-
-            <label class="field">
-              <span>Навык</span>
-              <select v-model="filters.technology">
-                <option value="all">Все теги</option>
-                <option v-for="tag in availableTechnologyTags" :key="tag" :value="tag">{{ tag }}</option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span>Формат</span>
-              <select v-model="filters.workFormat">
-                <option value="all">Все форматы</option>
-                <option v-for="format in workFormats" :key="format" :value="format">{{ format }}</option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span>Тип</span>
-              <select v-model="filters.opportunityType">
-                <option value="all">Все типы</option>
-                <option v-for="type in opportunityTypes" :key="type" :value="type">{{ type }}</option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span>Зарплата от</span>
-              <input v-model.number="filters.salaryFrom" type="number" min="0" step="10000" placeholder="120000" />
-            </label>
-
-            <button class="ghost-button" type="button" @click="reset">Сбросить</button>
-          </div>
-
-          <div class="feed-card stats-card">
-            <div class="stat-row">
-              <span>Найдено</span>
-              <strong>{{ filtered.length }}</strong>
-            </div>
-            <div class="stat-row">
-              <span>Активных фильтров</span>
-              <strong>{{ activeFilterCount }}</strong>
-            </div>
-            <div class="stat-row">
-              <span>Избранное</span>
-              <strong>{{ opportunities.filter((item) => favorites.has(item.id)).length }}</strong>
-            </div>
-          </div>
-
-          <div class="toolbar-card feed-card">
-            <p class="results-copy">
-              Найдено {{ filtered.length }} {{ pluralize(filtered.length, 'возможность', 'возможности', 'возможностей') }}
-            </p>
-
-            <div class="view-switcher">
-              <button
-                type="button"
-                class="view-button"
-                @click="activeView = 'map'"
-              >
-                Карта
-              </button>
-              <button
-                type="button"
-                class="view-button active"
-                @click="activeView = 'list'"
-              >
-                Лента
-              </button>
-            </div>
-          </div>
-        </aside>
-
-        <section class="feed-container">
-          <div class="feed-header feed-card">
-            <div>
-              <p class="feed-label">Лента</p>
-              <h2>Подходящие возможности</h2>
-            </div>
-          </div>
-
-          <div class="feed-panel">
-            <article v-for="opportunity in filtered" :key="opportunity.id" class="feed-item">
-              <div class="feed-item-main">
-                <div class="feed-item-topline">
-                  <div class="badge-row">
-                    <span class="pill">{{ formatOpportunityType(opportunity.type) + " • "}} </span>
-                    <span class="pill muted">{{ formatWorkFormat(opportunity.workFormat) + " • "}}</span>
-                    <span class="pill subtle">{{ formatEmployment(opportunity.employment) }}</span>
-                  </div>
-                </div>
-
-                <div class="feed-copy">
-                  <p class="feed-company">{{ opportunity.companyName }}</p>
-                  <h3>
-                    <RouterLink :to="`/opportunities/${opportunity.id}`" class="feed-title">
-                      {{ opportunity.title }}
-                    </RouterLink>
-                  </h3>
-                  <p class="feed-summary">{{ opportunity.summary }}</p>
-                </div>
-
-                <div class="feed-meta">
-                  <span>{{ opportunity.location.placementLabel }}</span>
-                  <span>{{ formatMoneyRange(opportunity.salaryFrom, opportunity.salaryTo) }}</span>
-                  <span>{{ [...opportunity.technologies, ...opportunity.levels].slice(0, 4).join(' • ') || 'Теги появятся позже' }}</span>
-                </div>
-
-                <div class="feed-actions">
-                  <RouterLink :to="`/opportunities/${opportunity.id}`" class="primary-button">Откликнуться</RouterLink>
-                </div>
-              </div>
-
-              <div class="feed-item-side">
-                <div class="company-avatar">
-                  <img
-                    v-if="opportunity.companyAvatarUrl"
-                    :src="opportunity.companyAvatarUrl"
-                    :alt="opportunity.companyName"
-                    class="company-avatar-image"
-                  />
-                  <span v-else class="company-avatar-fallback">
-                    {{ opportunity.companyName.slice(0, 2).toUpperCase() }}
-                  </span>
-                </div>
-              </div>
-            </article>
-          </div>
-        </section>
-      </div>
-    </section>
   </section>
 </template>
 
 <style scoped>
-.explorer {
-  max-width: 100%;
-  margin: 0 auto;
+/* ── Root ── */
+.he-root {
   display: grid;
   gap: 12px;
+  max-width: 100%;
 }
 
-.status-banner {
-  margin: 0;
-  padding: 12px 14px;
-  border: 1px solid #d7dee7;
-  border-radius: 12px;
+/* ── Status ── */
+.he-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
   background: var(--surface);
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+  max-width: 1240px;
+  margin: 0 auto;
+  width: 100%;
 }
+.he-status--error { border-color: var(--border-red); background: var(--surface-red); color: #991b1b; }
 
-.status-banner.error {
-  color: var(--danger);
+.he-spinner {
+  width: 15px; height: 15px;
+  border: 2px solid var(--border);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  flex-shrink: 0;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-.map-shell {
+/* ── MAP VIEW ── */
+.he-map-shell {
   position: relative;
   height: calc(100vh - 140px);
-  min-height: calc(100vh - 140px);
-  border: 1px solid #d7dee7;
-  border-radius: 16px;
+  min-height: 500px;
+  border-radius: 18px;
   overflow: hidden;
-  background: #dfe7ef;
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 20px rgba(15,23,42,.06);
 }
 
-.map-surface {
+.he-map {
   position: absolute;
   inset: 0;
   display: block;
 }
 
-.map-overlay {
+.he-overlay {
   position: absolute;
   z-index: 2;
 }
 
-.filters-overlay {
-  top: 16px;
-  left: 16px;
-  right: 16px;
+/* Filter bar */
+.he-filter-bar {
+  top: 14px;
+  left: 14px;
+  right: 14px;
 }
 
-.toolbar-overlay {
-  top: 136px;
-  left: 16px;
-}
-
-.details-overlay {
-  right: 16px;
-  top: 208px;
-  width: min(360px, calc(100% - 32px));
-}
-
-.legend-overlay {
-  left: 16px;
-  bottom: 16px;
-}
-
-.filter-panel,
-.toolbar-card,
-.map-legend,
-.hover-placeholder,
-.list-topbar,
-.feed-panel {
-  border: 1px solid #d7dee7;
+.he-filter-inner {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 12px 14px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(10px);
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(15,23,42,.1);
+  flex-wrap: wrap;
 }
 
-.filter-panel {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 10px;
-  padding: 12px;
+.he-filter-field { display: grid; gap: 0; flex: 1; min-width: 130px; position: relative; }
+.he-filter-field--wide { flex: 2; min-width: 220px; }
+
+.he-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px; height: 14px;
+  color: #94a3b8;
+  pointer-events: none;
 }
 
-.filter-panel.compact {
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
-  backdrop-filter: none;
+/* Inputs */
+.he-input {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-strong);
+  font: inherit;
+  font-size: 0.84rem;
+  color: var(--text);
+  outline: none;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+  width: 100%;
+  box-sizing: border-box;
 }
+.he-input::placeholder { color: #94a3b8; }
+.he-input:focus { border-color: #3b82f6; background: var(--surface); box-shadow: 0 0 0 3px rgba(59,130,246,.1); }
+.he-input--search { padding-left: 32px; }
+.he-input--icon { padding-left: 32px; }
 
-.toolbar-card {
+/* Reset */
+.he-reset-btn {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all .15s;
+}
+.he-reset-btn:hover { border-color: var(--border-red); background: var(--surface-red); color: #dc2626; }
+.he-reset-btn--full { width: 100%; height: 34px; }
+
+/* Toolbar */
+.he-toolbar {
+  top: calc(14px + 36px + 24px + 14px);
+  left: 14px;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 10px 12px;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--surface);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 12px rgba(15,23,42,.08);
 }
 
-.results-copy {
-  margin: 0;
+.he-count-label {
+  font-size: 0.82rem;
   color: var(--muted);
-  line-height: 1.4;
-  font-size: 0.9rem;
+  font-weight: 500;
 }
 
-.field {
-  display: grid;
-  gap: 6px;
+/* View switch */
+.he-view-switch,
+.he-view-card {
+  display: flex;
+  gap: 4px;
 }
 
-.field span {
+.he-view-card {
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-strong);
+}
+
+.he-view-btn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.he-view-btn:hover { background: var(--surface-muted); }
+.he-view-btn--active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+/* Hover card */
+.he-hover-card-wrap {
+  right: 14px;
+  top: 14px;
+  width: min(340px, calc(100% - 28px));
+}
+
+.he-hover-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 28px 20px;
+  border-radius: 14px;
+  background: var(--surface);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(15,23,42,.08);
+}
+.he-hover-placeholder span { font-size: 1.6rem; }
+.he-hover-placeholder p { margin: 0; font-size: 0.82rem; color: var(--muted); max-width: 22ch; }
+
+/* Legend */
+.he-legend {
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: var(--surface);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
   font-size: 0.78rem;
   color: var(--muted);
 }
+.he-legend span { display: flex; align-items: center; gap: 6px; }
+.he-dot { width: 10px; height: 10px; border-radius: 50%; background: #2563eb; display: block; }
+.he-dot--fav { background: #16a34a; }
 
-.field input,
-.field select,
-.view-button {
-  min-height: 38px;
-  padding: 0 12px;
-  border: 1px solid #d7dee7;
-  border-radius: 8px;
-  background: #fff;
-  font-size: 0.9rem;
-}
-
-.view-button {
-  cursor: pointer;
-}
-
-.view-switcher {
-  display: grid;
-  grid-auto-flow: column;
-  gap: 8px;
-}
-
-.view-button.active {
-  color: #fff;
-  border-color: var(--accent);
-  background: var(--accent);
-}
-
-.hover-placeholder {
-  display: grid;
-  place-items: center;
-  min-height: 180px;
-  padding: 20px;
-  color: var(--muted);
-  text-align: center;
-}
-
-.map-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 10px 12px;
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-
-.map-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.legend-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  background: var(--accent);
-}
-
-.legend-dot.favorite {
-  background: #12756e;
-}
-
-.list-shell {
-  display: grid;
+/* ── LIST VIEW ── */
+.he-list-shell {
   max-width: 1240px;
   width: 100%;
   margin: 0 auto;
 }
 
-.list-layout {
+.he-list-layout {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 260px minmax(0,1fr);
   gap: 20px;
   align-items: start;
 }
 
-.list-sidebar {
+/* Sidebar */
+.he-sidebar {
   position: sticky;
   top: 20px;
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
-.feed-filters {
+.he-sidebar-card {
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgba(15,23,42,.04);
   display: grid;
   gap: 12px;
-  padding: 14px;
 }
 
-.feed-container {
-  display: grid;
-  gap: 14px;
-}
-
-.feed-card,
-.feed-panel {
-  border: 1px solid #d7dee7;
-  border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
-}
-
-.feed-header {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 20px;
-}
-
-.feed-label {
-  margin: 0 0 6px;
-  color: #2952cc;
-  font: 700 0.72rem/1 var(--font-mono);
-  text-transform: uppercase;
-}
-
-.feed-header h2 {
+.he-sidebar-kicker {
   margin: 0;
-  color: #162033;
-  font-size: 1.55rem;
+  font: 700 0.65rem/1 var(--font-mono, monospace);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: #3b82f6;
 }
 
-.stats-card {
+.he-sidebar-fields { display: grid; gap: 10px; }
+
+.he-sidebar-field { display: grid; gap: 5px; }
+.he-sidebar-field > span { font-size: 0.75rem; font-weight: 600; color: var(--muted); }
+
+.he-search-wrap { position: relative; }
+.he-search-icon--inside { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 13px; height: 13px; color: #94a3b8; pointer-events: none; z-index: 1; }
+
+/* Stats card */
+.he-stats-card {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  grid-template-columns: repeat(3,1fr);
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgba(15,23,42,.04);
 }
 
-.stat-row {
+.he-stat {
+  display: grid;
+  gap: 2px;
+  text-align: center;
+  padding: 8px 4px;
+  border-radius: 9px;
+  background: var(--surface-strong);
+}
+.he-stat span { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #94a3b8; }
+.he-stat strong { font-size: 1.1rem; font-weight: 800; color: var(--text); font-family: var(--font-heading); }
+
+/* Feed */
+.he-feed { display: grid; gap: 14px; }
+
+.he-feed-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid #e6ebf2;
-  border-radius: 12px;
-  background: #fbfcfe;
+  padding: 18px 22px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgba(15,23,42,.04);
 }
 
-.stat-row span {
-  color: #627087;
+.he-feed-kicker {
+  margin: 0 0 4px;
+  font: 700 0.65rem/1 var(--font-mono, monospace);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: #3b82f6;
+}
+
+.he-feed-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.4rem;
+  color: var(--text);
+}
+
+.he-feed-count {
   font-size: 0.84rem;
+  color: var(--muted);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-.stat-row strong {
-  color: #162033;
-  font-size: 0.98rem;
-}
-
-.feed-panel {
+/* Empty */
+.he-feed-empty {
   display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+  padding: 48px 24px;
+  border: 1.5px dashed var(--border);
+  border-radius: 16px;
+  background: var(--surface-strong);
+}
+.he-feed-empty-icon { font-size: 2rem; }
+.he-feed-empty strong { font-size: 0.95rem; color: var(--text); }
+.he-feed-empty p { margin: 0; font-size: 0.84rem; color: #94a3b8; }
+
+/* Feed list */
+.he-feed-list { display: grid; gap: 10px; }
+
+/* Feed card */
+.he-card {
+  display: grid;
+  grid-template-columns: 56px minmax(0,1fr) auto;
   gap: 16px;
-  padding: 16px;
+  align-items: start;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgba(15,23,42,.04);
+  transition: border-color .15s, box-shadow .15s, transform .15s;
+}
+.he-card:hover {
+  border-color: var(--accent-soft);
+  box-shadow: 0 6px 20px rgba(59,130,246,.1);
+  transform: translateY(-1px);
 }
 
-.feed-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 112px;
-  gap: 20px;
-  padding: 22px 24px;
-  border: 1px solid #dde5ef;
-  border-radius: 20px;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
-}
-
-.feed-item-main,
-.feed-copy {
-  display: grid;
-  gap: 12px;
-}
-
-.feed-item-topline,
-.feed-actions {
+.he-card-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: linear-gradient(135deg, #dbeafe, #bfdbfe);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.feed-company {
-  margin: 0;
-  color: #1e3fa0;
-  font: 700 0.82rem/1 var(--font-mono);
-  text-transform: uppercase;
-}
-
-.feed-title {
-  color: #162033;
-  text-decoration: none;
-}
-
-.feed-title:hover {
-  color: #2147b7;
-}
-
-.feed-copy h3 {
-  margin: 0;
-  font-size: 1.65rem;
-  line-height: 1.08;
-}
-
-.feed-summary {
-  margin: 0;
-  max-width: 68ch;
-  color: #5c6778;
+  justify-content: center;
   font-size: 1rem;
-  line-height: 1.55;
+  font-weight: 800;
+  color: var(--chip-blue-text);
+  text-decoration: none;
+  flex-shrink: 0;
 }
+.he-card-avatar img { width: 100%; height: 100%; object-fit: cover; }
 
-.feed-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  color: #4c5b70;
-  font-size: 0.92rem;
-}
+/* Card body */
+.he-card-body { display: grid; gap: 8px; min-width: 0; }
 
-.feed-meta span {
+.he-card-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.he-chip {
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: #f3f6fa;
+}
+.he-chip--blue   { background: var(--chip-blue); color: var(--chip-blue-text); }
+.he-chip--green  { background: var(--chip-green); color: var(--success); }
+.he-chip--purple { background: var(--chip-purple); color: var(--chip-purple-text); }
+.he-chip--orange { background: var(--chip-orange); color: var(--chip-orange-text); }
+.he-chip--grey   { background: var(--surface-muted); color: var(--muted); }
+
+.he-card-company {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #3b82f6;
+  text-transform: uppercase;
+  letter-spacing: .04em;
 }
 
-.feed-item-side {
-  display: grid;
-  align-content: center;
-  justify-items: center;
+.he-card-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.1rem;
+  color: var(--text);
+  line-height: 1.2;
 }
 
-.company-avatar {
-  display: grid;
-  place-items: center;
-  width: 90px;
-  height: 90px;
-  overflow: hidden;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #e8efff, #c8d8ff);
+.he-card-title a {
+  color: inherit;
+  text-decoration: none;
 }
+.he-card-title a:hover { color: #2563eb; }
 
-.company-avatar-image {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.company-avatar-fallback {
-  color: #2147b7;
-  font: 700 1rem/1 var(--font-heading);
-}
-
-.favorite-button {
-  border: 1px solid #d1dae5;
-  border-radius: 10px;
-  padding: 8px 12px;
-  color: var(--accent-strong);
-  background: var(--surface);
-  cursor: pointer;
+.he-card-summary {
+  margin: 0;
   font-size: 0.86rem;
+  color: var(--muted);
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-@media (max-width: 1100px) {
-  .filter-panel {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .toolbar-overlay {
-    top: 184px;
-  }
-
-  .details-overlay {
-    top: auto;
-    right: 16px;
-    left: 16px;
-    bottom: 68px;
-    width: auto;
-  }
-
-  .list-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .list-sidebar {
-    position: static;
-  }
+.he-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
-@media (max-width: 720px) {
-  .map-shell {
-    height: calc(100vh - 120px);
-    min-height: calc(100vh - 120px);
-  }
-
-  .filters-overlay,
-  .toolbar-overlay,
-  .details-overlay,
-  .legend-overlay {
-    left: 12px;
-    right: 12px;
-  }
-
-  .filter-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .toolbar-overlay {
-    top: 312px;
-  }
-
-  .toolbar-card {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .details-overlay {
-    bottom: 60px;
-  }
-
-  .feed-header,
-  .feed-item {
-    grid-template-columns: 1fr;
-  }
-
-  .feed-header {
-    align-items: flex-start;
-  }
-
-  .feed-item {
-    padding: 18px;
-  }
-
-  .feed-item-topline,
-  .feed-actions {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .feed-item-side {
-    justify-items: flex-start;
-  }
-
-  .feed-copy h3 {
-    font-size: 1.3rem;
-  }
+.he-card-meta > span {
+  font-size: 0.76rem;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
+
+.he-meta-tag {
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface-strong);
+  font-size: 0.72rem;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Apply button */
+.he-card-action {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 2px;
+}
+
+.he-apply-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 9px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background .15s;
+}
+.he-apply-btn:hover { background: #1d4ed8; }
+.he-apply-icon { width: 14px; height: 14px; flex-shrink: 0; }
+
+/* ── Responsive ── */
+@media (max-width: 1024px) {
+  .he-list-layout { grid-template-columns: 1fr; }
+  .he-sidebar { position: static; }
+  .he-stats-card { display: none; }
+}
+
+@media (max-width: 760px) {
+  .he-filter-inner {
+    grid-template-columns: 1fr 1fr;
+    display: grid;
+  }
+  .he-filter-field--wide { grid-column: 1 / -1; }
+  .he-hover-card-wrap { display: none; }
+  .he-card {
+    grid-template-columns: 44px minmax(0,1fr);
+    grid-template-rows: auto auto;
+  }
+  .he-card-action { grid-column: 2; }
+}
+
+@media (max-width: 540px) {
+  .he-card { grid-template-columns: 1fr; }
+  .he-card-avatar { width: 44px; height: 44px; border-radius: 10px; }
+  .he-card-action { grid-column: 1; }
+}
+</style>
+
+<style scoped>
+:global(.dark) .he-filter-inner,
+:global(.dark) .he-toolbar,
+:global(.dark) .he-sidebar-card,
+:global(.dark) .he-stats-card,
+:global(.dark) .he-legend { background: var(--surface); border-color: var(--border); }
+
+:global(.dark) .he-card { background: var(--surface); border-color: var(--border); }
+:global(.dark) .he-card:hover { border-color: var(--accent); }
+:global(.dark) .he-card-avatar { border-color: var(--border); background: var(--surface-muted); }
+
+:global(.dark) .he-chip--blue   { background: #0f1e38; color: #60a5fa; }
+:global(.dark) .he-chip--green  { background: #091a0d; color: #4ade80; }
+:global(.dark) .he-chip--purple { background: #130e22; color: #a78bfa; }
+:global(.dark) .he-chip--orange { background: #1c1000; color: #fb923c; }
+:global(.dark) .he-chip--grey   { background: #263045; color: var(--muted); }
+
+:global(.dark) .he-status--error { border-color: #7f1d1d; background: #1f0808; color: #fca5a5; }
+:global(.dark) .he-reset-btn:hover { border-color: #7f1d1d; background: #1f0808; color: #fca5a5; }
+:global(.dark) .he-feed-empty { border-color: var(--border); background: var(--surface-muted); }
+
+:global(.dark) .he-view-card { background: var(--surface); border-color: var(--border); }
+:global(.dark) .he-view-btn:hover { background: var(--surface-muted); }
+
+:global(.dark) .he-hover-card { background: var(--surface); border-color: var(--border); }
+:global(.dark) .he-hover-card-avatar { background: var(--surface-muted); border-color: var(--border); }
 </style>

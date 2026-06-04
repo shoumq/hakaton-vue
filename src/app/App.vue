@@ -4,6 +4,7 @@ import { RouterView } from 'vue-router'
 
 import { useSession } from '@/features/session/model/session'
 import { PlatformHeader } from '@/widgets/platform-header'
+import ErrorBoundary from './ErrorBoundary.vue'
 
 const session = useSession()
 
@@ -13,10 +14,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="app-shell">
-    <PlatformHeader />
-    <RouterView />
-  </div>
+  <ErrorBoundary>
+    <div class="app-shell">
+      <PlatformHeader />
+      <RouterView />
+    </div>
+  </ErrorBoundary>
 </template>
 
 <style scoped>

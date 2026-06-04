@@ -8,7 +8,9 @@ import LucideSendHorizontal from '~icons/lucide/send-horizontal'
 import { useSession } from '@/features/session/model/session'
 import {
   fetchChatMessages,
+  fetchCompanyById,
   fetchMyChats,
+  fetchStudentById,
   getApiErrorMessage,
   markChatAsRead,
   sendChatMessage,
@@ -35,6 +37,9 @@ const isSending = ref(false)
 const socketState = ref<SocketState>('idle')
 const chatClient = ref<ChatSocketClient | null>(null)
 const markingReadIds = ref<Record<string, boolean>>({})
+
+// resolved display names keyed by user/company id
+const resolvedNames = ref<Record<string, string>>({})
 
 const messageForm = reactive({
   body: '',
@@ -123,9 +128,6 @@ const selectedChatProfileLink = computed(() => {
   return companyId ? `/profiles/companies/${companyId}` : ''
 })
 
-const selectedChatProfileLabel = computed(() => {
-  return isEmployerChat(selectedChat.value) ? 'Профиль компании' : 'Профиль соискателя'
-})
 
 function saveChatProfilePreview(chat: ChatConversationDto | null) {
   if (!chat) {
@@ -335,8 +337,61 @@ function connectSocket(chatId: string) {
   chatClient.value.connect()
 }
 
+async function resolveParticipantName(chat: ChatConversationDto) {
+  const id = chat.participant_user_id
+  if (!id || resolvedNames.value[id]) return
+
+  try {
+    if (isEmployerChat(chat)) {
+      const companyId = chat.company_id || id
+      const company = await fetchCompanyById(companyId)
+      resolvedNames.value = {
+        ...resolvedNames.value,
+        [id]: company.brand_name || company.legal_name || chat.participant_name || '',
+      }
+    } else {
+      const profile = await fetchStudentById(id)
+      const first = profile.first_name?.trim() ?? ''
+      const last = profile.last_name?.trim() ?? ''
+      const full = [first, last].filter(Boolean).join(' ') || profile.display_name?.trim() || ''
+      resolvedNames.value = {
+        ...resolvedNames.value,
+        [id]: full || chat.participant_name || '',
+      }
+    }
+  } catch {
+    // fallback stays as participant_name
+  }
+}
+
+function getParticipantDisplayName(chat: ChatConversationDto | null): string {
+  if (!chat) return 'Чат'
+  const resolved = chat.participant_user_id ? resolvedNames.value[chat.participant_user_id] : ''
+  return resolved || chat.participant_name || chat.company_legal_name || 'Чат'
+}
+
+function getSenderDisplayName(message: ChatMessageDto): string {
+  if (!message.sender_user_id) return message.sender_name || 'Пользователь'
+  if (message.sender_user_id === currentUserId.value) {
+    return session.currentUser.value?.displayName || message.sender_name || 'Вы'
+  }
+  return resolvedNames.value[message.sender_user_id] || message.sender_name || message.sender_user_id
+}
+
 function saveSelectedChatProfilePreview() {
   saveChatProfilePreview(selectedChat.value)
+}
+
+function getSenderProfileLink(senderId: string) {
+  if (!senderId) return ''
+  if (senderId === currentUserId.value) return '/profile'
+  const chat = selectedChat.value
+  if (!chat) return ''
+  if (!isEmployerChat(chat)) {
+    return `/profiles/students/${senderId}`
+  }
+  const companyId = chat.company_id || chat.participant_user_id
+  return companyId ? `/profiles/companies/${companyId}` : ''
 }
 
 async function handleSendMessage() {
@@ -392,6 +447,9 @@ watch(
 
     await loadMessages(chatId)
     connectSocket(chatId)
+
+    const chat = chats.value.find((c) => c.id === chatId)
+    if (chat) void resolveParticipantName(chat)
   },
   { immediate: true },
 )
@@ -450,19 +508,23 @@ onBeforeUnmount(() => {
           <div v-if="selectedChat" class="chat-panel">
             <div class="panel-head">
               <div>
-                <h2>{{ selectedChat.participant_name || selectedChat.company_legal_name || 'Чат' }}</h2>
+                <h2>
+                  <RouterLink
+                    v-if="selectedChatProfileLink"
+                    :to="selectedChatProfileLink"
+                    class="chat-name-link"
+                    @click="saveSelectedChatProfilePreview"
+                  >
+                    {{ getParticipantDisplayName(selectedChat) }}
+                  </RouterLink>
+                  <template v-else>
+                    {{ getParticipantDisplayName(selectedChat) }}
+                  </template>
+                </h2>
                 <p v-if="getSelectedChatHeaderSubtitle(selectedChat)" class="chat-subtitle">
                   {{ getSelectedChatHeaderSubtitle(selectedChat) }}
                 </p>
               </div>
-              <RouterLink
-                v-if="selectedChatProfileLink"
-                :to="selectedChatProfileLink"
-                class="ghost-button"
-                @click="saveSelectedChatProfilePreview"
-              >
-                {{ selectedChatProfileLabel }}
-              </RouterLink>
             </div>
 
             <p v-if="messagesError" class="panel-status error">{{ messagesError }}</p>
@@ -491,7 +553,14 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="message-bubble">
                     <div class="message-meta-line">
-                      <strong>{{ message.sender_name || message.sender_user_id || 'Пользователь' }}</strong>
+                      <RouterLink
+                        v-if="getSenderProfileLink(message.sender_user_id || '')"
+                        :to="getSenderProfileLink(message.sender_user_id || '')"
+                        class="sender-name-link"
+                      >
+                        {{ getSenderDisplayName(message) }}
+                      </RouterLink>
+                      <strong v-else>{{ getSenderDisplayName(message) }}</strong>
                       <span>{{ formatMessageTime(message.created_at) }}</span>
                     </div>
                     <p class="message-body">{{ message.body || '' }}</p>
@@ -546,10 +615,10 @@ onBeforeUnmount(() => {
 .chats-hero,
 .chat-sidebar,
 .chat-panel {
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.045);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
 }
 
 .chats-hero,
@@ -606,7 +675,7 @@ onBeforeUnmount(() => {
 
 .eyebrow {
   margin: 0 0 6px;
-  color: #2952cc;
+  color: var(--accent);
   font-size: 0.74rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -615,20 +684,20 @@ onBeforeUnmount(() => {
 h1,
 h2 {
   margin: 0;
-  color: #162033;
+  color: var(--text);
   font-family: var(--font-heading);
 }
 
 .chat-subtitle {
   margin: 6px 0 0;
-  color: #5f6b7a;
+  color: var(--muted);
   line-height: 1.45;
 }
 
 .hero-copy,
 .panel-status {
   margin: 0;
-  color: #5f6b7a;
+  color: var(--muted);
   line-height: 1.5;
 }
 
@@ -652,9 +721,9 @@ h2 {
   display: grid;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid #e4eaf1;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fafbfd;
+  background: var(--surface-strong);
   text-decoration: none;
 }
 
@@ -699,8 +768,8 @@ h2 {
   place-items: center;
   overflow: hidden;
   border-radius: 50%;
-  background: #eef3f8;
-  border: 1px solid #d7dee7;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
 }
 
 .avatar-image {
@@ -710,7 +779,7 @@ h2 {
 }
 
 .avatar-fallback {
-  color: #24456b;
+  color: var(--muted);
   font-size: 0.82rem;
   font-weight: 700;
 }
@@ -724,7 +793,7 @@ h2 {
 
 .conversation-copy strong,
 .message-bubble strong {
-  color: #162033;
+  color: var(--text);
 }
 
 .conversation-copy strong,
@@ -736,7 +805,7 @@ h2 {
 }
 
 .conversation-copy span {
-  color: #5f6b7a;
+  color: var(--muted);
   font-size: 0.82rem;
 }
 
@@ -746,8 +815,8 @@ h2 {
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  background: #eef3f8;
-  color: #24456b;
+  background: var(--surface-muted);
+  color: var(--muted);
   font-size: 0.8rem;
   text-transform: capitalize;
 }
@@ -794,9 +863,9 @@ h2 {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px;
   padding: 10px 12px;
-  border: 1px solid #e4eaf1;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: #fafbfd;
+  background: var(--surface-strong);
   width: fit-content;
   max-width: min(72%, 680px);
   justify-self: start;
@@ -813,7 +882,7 @@ h2 {
 .message-bubble p,
 .message-bubble span {
   margin: 0;
-  color: #162033;
+  color: var(--text);
   line-height: 1.5;
 }
 
@@ -824,7 +893,7 @@ h2 {
 }
 
 .message-bubble span {
-  color: #5f6b7a;
+  color: var(--muted);
   font-size: 0.8rem;
 }
 
@@ -833,7 +902,7 @@ h2 {
   align-items: center;
   justify-content: flex-end;
   align-self: end;
-  color: #2952cc;
+  color: var(--accent);
   grid-column: 2 / 3;
   grid-row: 2 / 3;
 }
@@ -847,9 +916,10 @@ h2 {
   min-height: 42px;
   max-height: 120px;
   padding: 9px 11px;
-  border: 1px solid #d7dee7;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
+  color: var(--text);
   resize: none;
   font: inherit;
   position: relative;
@@ -862,13 +932,13 @@ h2 {
   gap: 12px;
   padding-top: 8px;
   padding-bottom: 2px;
-  border-top: 1px solid rgba(18, 38, 63, 0.08);
+  border-top: 1px solid var(--border);
   margin-top: auto;
   position: sticky;
   bottom: 0;
   z-index: 1;
   isolation: isolate;
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--surface);
 }
 
 .messages-list {
@@ -886,8 +956,8 @@ h2 {
   min-height: 28px;
   padding: 0 12px;
   border-radius: 999px;
-  background: rgba(233, 239, 248, 0.92);
-  color: #5f6b7a;
+  background: var(--surface-muted);
+  color: var(--muted);
   font-size: 0.78rem;
   font-weight: 600;
 }
@@ -917,6 +987,62 @@ h2 {
   grid-column: 1 / -1;
 }
 
+.chat-name-link {
+  color: inherit;
+  text-decoration: none;
+  font: inherit;
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  transition: background 0.15s, color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.chat-name-link::after {
+  content: '↗';
+  font-size: 0.7em;
+  opacity: 0;
+  transform: translateY(1px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+.chat-name-link:hover {
+  background: rgba(41, 82, 204, 0.08);
+  color: #2952cc;
+}
+.chat-name-link:hover::after {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+.sender-name-link {
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+  transition: background 0.15s, color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sender-name-link::after {
+  content: '↗';
+  font-size: 0.65em;
+  opacity: 0;
+  transform: translateY(1px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+.sender-name-link:hover {
+  background: rgba(41, 82, 204, 0.08);
+  color: #2952cc;
+}
+.sender-name-link:hover::after {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
 .secondary-button {
   display: inline-flex;
   align-items: center;
@@ -930,7 +1056,7 @@ h2 {
 
 .secondary-button {
   border: 1px solid #d7dee7;
-  background: #fff;
+  background: var(--surface);
   color: #2952cc;
 }
 

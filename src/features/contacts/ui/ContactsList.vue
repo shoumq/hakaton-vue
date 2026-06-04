@@ -1,108 +1,157 @@
 <script setup lang="ts">
+import { RouterLink } from 'vue-router'
 import type { ContactPersonCard } from '@/features/contacts/model/network'
 
 defineProps<{
   items: ContactPersonCard[]
   emptyTitle: string
   emptyText: string
+  getItemLink?: (item: ContactPersonCard) => string
 }>()
 </script>
 
 <template>
   <div class="contacts-list">
-    <article v-if="!items.length" class="network-card empty-card">
+    <div v-if="!items.length" class="cl-empty">
       <strong>{{ emptyTitle }}</strong>
       <p>{{ emptyText }}</p>
-    </article>
+    </div>
 
-    <article v-for="item in items" :key="item.id" class="network-card">
-      <div class="card-head">
-        <div class="avatar-shell">
-          <img v-if="item.avatarUrl" :src="item.avatarUrl" :alt="item.displayName" class="avatar-image" />
-          <span v-else class="avatar-fallback">{{ item.displayName.slice(0, 2).toUpperCase() }}</span>
-        </div>
-        <div class="card-copy">
-          <strong>{{ item.displayName }}</strong>
-          <span v-if="item.headline">{{ item.headline }}</span>
-          <p v-if="item.message">{{ item.message }}</p>
-        </div>
+    <component
+      :is="getItemLink ? RouterLink : 'article'"
+      v-for="item in items"
+      :key="item.id"
+      class="cl-card"
+      v-bind="getItemLink ? { to: getItemLink(item) } : {}"
+    >
+      <div class="cl-avatar">
+        <img v-if="item.avatarUrl" :src="item.avatarUrl" :alt="item.displayName" class="cl-avatar-img" />
+        <span v-else class="cl-avatar-fallback">{{ item.displayName.slice(0, 2).toUpperCase() }}</span>
       </div>
-
-      <div class="card-actions">
+      <div class="cl-copy">
+        <strong>{{ item.displayName }}</strong>
+        <span v-if="item.headline">{{ item.headline }}</span>
+        <p v-if="item.message">{{ item.message }}</p>
+      </div>
+      <div v-if="$slots.actions" class="cl-actions">
         <slot name="actions" :item="item" />
       </div>
-    </article>
+    </component>
   </div>
 </template>
 
 <style scoped>
 .contacts-list {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
-.network-card {
+.cl-empty {
+  padding: 20px;
+  border: 1.5px dashed #e2e8f0;
+  border-radius: 12px;
   display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.9);
+  gap: 4px;
+  color: var(--muted);
 }
 
-.empty-card p {
+.cl-empty strong {
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.cl-empty p {
   margin: 0;
-  color: #5f6b7a;
+  font-size: 0.8rem;
+  color: var(--border-strong);
 }
 
-.card-head {
-  display: flex;
-  gap: 12px;
-  align-items: start;
-}
-
-.avatar-shell {
-  width: 48px;
-  height: 48px;
+.cl-card {
   display: grid;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid #d7dee7;
-  border-radius: 50%;
-  background: #eef3f8;
+  grid-template-columns: 36px minmax(0,1fr);
+  grid-template-rows: auto auto;
+  gap: 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, background 0.15s;
 }
 
-.avatar-image {
+.cl-card:hover {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.cl-avatar {
+  grid-row: 1 / 3;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.cl-avatar-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.avatar-fallback {
-  color: #24456b;
-  font-size: 0.82rem;
+.cl-avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  color: #fff;
+  font-size: 0.72rem;
   font-weight: 700;
 }
 
-.card-copy {
+.cl-copy {
   display: grid;
-  gap: 4px;
+  gap: 1px;
+  min-width: 0;
+  align-self: center;
 }
 
-.card-copy strong {
-  color: #162033;
+.cl-copy strong {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.card-copy span,
-.card-copy p {
+.cl-copy span,
+.cl-copy p {
   margin: 0;
-  color: #5f6b7a;
-  line-height: 1.45;
+  font-size: 0.76rem;
+  color: var(--muted);
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.card-actions {
+.cl-actions {
+  grid-column: 2;
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
 }
+</style>
+
+<style scoped>
+:global(.dark) .cl-card { background: var(--surface-strong); border-color: var(--border); }
+:global(.dark) .cl-card:hover { background: var(--surface); border-color: var(--border-strong); }
+:global(.dark) .cl-copy strong { color: var(--text); }
+:global(.dark) .cl-copy span { color: var(--muted); }
 </style>

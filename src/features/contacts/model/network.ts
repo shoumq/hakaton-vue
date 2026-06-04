@@ -186,17 +186,13 @@ function normalizeContact(rawItem: ContactDto): ContactPersonCard {
 
 function normalizeRequest(rawItem: ContactDto, currentUserId: string): ContactRequestCard {
   const raw = rawItem as unknown as Record<string, unknown>
-  const requester = normalizeSummary(readObject(raw, ['requester'])) ?? null
-  const receiver = normalizeSummary(readObject(raw, ['receiver'])) ?? null
-  const fallbackSummary =
-    normalizeSummary(readObject(raw, ['contact_user', 'user'])) ?? requester ?? receiver ?? {}
 
-  const requesterUserId =
-    readString(raw, ['requester_user_id', 'from_user_id']) || requester?.userId || ''
-  const receiverUserId =
-    readString(raw, ['receiver_user_id', 'to_user_id']) || receiver?.userId || ''
+  // direction — prefer explicit field, fall back to is_incoming flag, then derive from user IDs
   const explicitDirection = readString(raw, ['direction'])
   const incomingFlag = readBoolean(raw, ['is_incoming'])
+
+  const senderUserId = readString(raw, ['sender_user_id', 'requester_user_id', 'from_user_id'])
+  const receiverUserId = readString(raw, ['receiver_user_id', 'to_user_id'])
 
   const direction: 'incoming' | 'outgoing' =
     explicitDirection === 'incoming' || explicitDirection === 'outgoing'
@@ -205,29 +201,39 @@ function normalizeRequest(rawItem: ContactDto, currentUserId: string): ContactRe
         ? 'incoming'
         : incomingFlag === false
           ? 'outgoing'
-          : requesterUserId && currentUserId && requesterUserId === currentUserId
+          : senderUserId && currentUserId && senderUserId === currentUserId
             ? 'outgoing'
             : receiverUserId && currentUserId && receiverUserId === currentUserId
               ? 'incoming'
               : 'outgoing'
 
-  const counterpart = direction === 'incoming' ? requester ?? fallbackSummary : receiver ?? fallbackSummary
-  const userId =
-    (direction === 'incoming' ? requesterUserId : receiverUserId) ||
-    counterpart.userId ||
-    readString(raw, ['user_id']) ||
-    String(rawItem.id)
-  const displayName =
-    counterpart.displayName ||
-    readString(raw, ['display_name', 'name']) ||
-    userId ||
-    'Пользователь'
+  // for incoming we show the sender, for outgoing we show the receiver
+  const counterpartUserId = direction === 'incoming' ? senderUserId : receiverUserId
+
+  // flat fields returned by backend: sender_name / receiver_name / sender_avatar_url / receiver_avatar_url
+  const flatName = direction === 'incoming'
+    ? readString(raw, ['sender_name'])
+    : readString(raw, ['receiver_name'])
+  const flatAvatar = direction === 'incoming'
+    ? readString(raw, ['sender_avatar_url'])
+    : readString(raw, ['receiver_avatar_url'])
+
+  // nested objects (legacy / alternative formats)
+  const nestedRequester = normalizeSummary(readObject(raw, ['requester'])) ?? null
+  const nestedReceiver = normalizeSummary(readObject(raw, ['receiver'])) ?? null
+  const nestedFallback = normalizeSummary(readObject(raw, ['contact_user', 'user'])) ?? null
+  const nested = direction === 'incoming'
+    ? nestedRequester ?? nestedFallback
+    : nestedReceiver ?? nestedFallback
+
+  const userId = counterpartUserId || nested?.userId || readString(raw, ['user_id']) || String(rawItem.id)
+  const displayName = flatName || nested?.displayName || readString(raw, ['display_name', 'name']) || userId
+  const avatarUrl = flatAvatar || nested?.avatarUrl || readString(raw, ['avatar_url']) || undefined
+
   const statusValue = readString(raw, ['status'])
   const status: ContactRequestStatus =
-    statusValue === 'accepted' ||
-    statusValue === 'rejected' ||
-    statusValue === 'cancelled' ||
-    statusValue === 'pending'
+    statusValue === 'accepted' || statusValue === 'rejected' ||
+    statusValue === 'cancelled' || statusValue === 'pending'
       ? statusValue
       : 'pending'
 
@@ -235,8 +241,8 @@ function normalizeRequest(rawItem: ContactDto, currentUserId: string): ContactRe
     id: String(rawItem.id || userId),
     userId,
     displayName,
-    avatarUrl: counterpart.avatarUrl || readString(raw, ['avatar_url']),
-    headline: counterpart.headline || readString(raw, ['title']),
+    avatarUrl: avatarUrl || undefined,
+    headline: nested?.headline || readString(raw, ['title']) || undefined,
     message: readString(raw, ['message']),
     createdAt: readString(raw, ['created_at', 'updated_at']),
     status,

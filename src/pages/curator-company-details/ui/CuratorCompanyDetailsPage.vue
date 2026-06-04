@@ -354,7 +354,7 @@ onMounted(loadPage)
 .review-hero,
 .section-card,
 .status-banner {
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 251, 0.94));
   box-shadow: 0 20px 44px rgba(15, 23, 42, 0.06);
@@ -390,9 +390,9 @@ onMounted(loadPage)
   display: grid;
   gap: 6px;
   padding: 14px 16px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--surface);
 }
 
 .summary-card span,
@@ -429,7 +429,7 @@ h1 {
 .comparison-grid {
   grid-template-columns: 180px minmax(0, 1fr) minmax(0, 1fr);
   gap: 0;
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 18px;
   overflow: hidden;
 }
@@ -438,7 +438,7 @@ h1 {
 .comparison-cell {
   padding: 14px 16px;
   border-bottom: 1px solid rgba(18, 38, 63, 0.08);
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--surface);
 }
 
 .comparison-header {
@@ -505,7 +505,7 @@ h1 {
 .ghost-link {
   border: 1px solid rgba(148, 163, 184, 0.26);
   color: #2952cc;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--surface);
 }
 
 @media (max-width: 900px) {

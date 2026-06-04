@@ -3,7 +3,6 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 
 import type { Opportunity, OpportunityType, WorkFormat } from '@/entities/opportunity/model/types'
-import OpportunityCard from '@/entities/opportunity/ui/OpportunityCard.vue'
 import { useSession } from '@/features/session/model/session'
 import MapLibreOpportunityMap from '@/shared/ui/MapLibreOpportunityMap.vue'
 import {
@@ -13,6 +12,7 @@ import {
   fetchEmployerCompany,
   fetchEmployerOpportunityApplications,
   fetchEmployerOpportunities,
+  fetchOpportunityAnalytics,
   fetchPublicCatalog,
   getApiErrorMessage,
   submitEmployerVerification,
@@ -24,10 +24,12 @@ import type {
   EmployerApplicationDto,
   EmployerApplicationStatus,
   EmployerCompanyDto,
+  OpportunityAnalyticsDto,
   OpportunityCreateInput,
   VerificationInput,
 } from '@/shared/api'
-import { formatDate } from '@/shared/lib/formatters'
+import { formatDate, formatOpportunityType, formatWorkFormat } from '@/shared/lib/formatters'
+import { sanitizeHtml } from '@/shared/lib/sanitize'
 import { saveStudentProfilePreview } from '@/shared/lib/profile-preview'
 import { showErrorToast, showSuccessToast } from '@/shared/lib/toast'
 
@@ -83,6 +85,9 @@ const applicationsError = ref('')
 const invitationError = ref('')
 const errorMessage = ref('')
 const infoMessage = ref('')
+const analysisOpportunityId = ref('')
+const isLoadingAnalysis = ref(false)
+const opportunityAnalysis = ref<OpportunityAnalyticsDto | null>(null)
 
 const verificationForm = reactive({
   inn: '',
@@ -120,7 +125,7 @@ const opportunityForm = reactive<OpportunityFormState>({
   expiresAt: '',
   eventStartAt: '',
   eventEndAt: '',
-  status: 'draft',
+  status: 'published',
   selectedTechnologyTagIds: [] as string[],
 })
 
@@ -175,10 +180,6 @@ const employmentOptions = [
   { value: 'project', label: 'Проектная работа' },
 ]
 
-const statusOptions = [
-  { value: 'draft', label: 'Черновик' },
-  { value: 'published', label: 'Опубликовать' },
-]
 
 const applicationStatusOptions: Array<{ value: EmployerApplicationStatus; label: string }> = [
   { value: 'submitted', label: 'Новые' },
@@ -326,7 +327,7 @@ function resetOpportunityForm() {
   opportunityForm.expiresAt = ''
   opportunityForm.eventStartAt = ''
   opportunityForm.eventEndAt = ''
-  opportunityForm.status = 'draft'
+  opportunityForm.status = 'published'
   opportunityForm.selectedTechnologyTagIds = []
 }
 
@@ -373,6 +374,11 @@ function validateCustomLocation() {
 
 function getApplicationStatusLabel(status?: EmployerApplicationStatus) {
   return applicationStatusOptions.find((item) => item.value === status)?.label || status || 'Новые'
+}
+
+function getOpportunityStatusLabel(status?: string) {
+  const map: Record<string, string> = { active: 'Активна', closed: 'Закрыта', planned: 'Скоро', draft: 'Черновик' }
+  return map[status ?? ''] ?? status ?? ''
 }
 
 function getApplicationAvatar(application: EmployerApplicationDto) {
@@ -716,6 +722,29 @@ async function handleOpenApplicantChat(application: EmployerApplicationDto) {
   }
 }
 
+async function handleRequestAnalysis(opportunityId: string) {
+  analysisOpportunityId.value = opportunityId
+  isLoadingAnalysis.value = true
+  opportunityAnalysis.value = null
+
+  try {
+    opportunityAnalysis.value = await fetchOpportunityAnalytics(opportunityId)
+  } catch (error: unknown) {
+    const status = (error as { response?: { status?: number } })?.response?.status
+    if (status === 503) {
+      showErrorToast('ИИ-аналитика пока не настроена')
+    } else if (status === 502) {
+      showErrorToast('Не удалось получить ответ от ИИ')
+    } else if (status === 401) {
+      showErrorToast('Необходима авторизация')
+    } else {
+      showErrorToast(getApiErrorMessage(error, 'Не удалось выполнить ИИ-анализ.'))
+    }
+  } finally {
+    isLoadingAnalysis.value = false
+  }
+}
+
 onMounted(async () => {
   isLoading.value = true
   errorMessage.value = ''
@@ -756,273 +785,208 @@ watch(
 
 <template>
   <main class="page-shell">
-    <section class="dashboard">
-      <div class="dashboard-hero">
-        <div class="hero-copy-block">
-          <p class="eyebrow">Employer Console</p>
-          <h1>{{ company?.brand_name || company?.legal_name || 'Компания' }}</h1>
-          <p class="hero-copy">
-            {{ company?.description || 'Заполните профиль компании и отправьте верификацию перед публикацией.' }}
-          </p>
-          <div class="hero-metrics">
-            <div class="metric-chip">
-              <span>Статус</span>
-              <strong>{{ companyStatusLabel }}</strong>
+    <div class="ed-root">
+
+      <!-- Hero -->
+      <header class="ed-hero">
+        <div class="ed-cover"></div>
+        <div class="ed-hero-body">
+          <div class="ed-co-avatar">
+            <img v-if="company?.avatar_url" :src="company.avatar_url" alt="Логотип" />
+            <span v-else>{{ avatarFallback }}</span>
+          </div>
+          <div class="ed-identity">
+            <p class="ed-eyebrow">Кабинет работодателя</p>
+            <h1 class="ed-company-name">{{ company?.brand_name || company?.legal_name || 'Компания' }}</h1>
+            <p v-if="company?.description" class="ed-company-desc">{{ company.description }}</p>
+            <div class="ed-hero-chips">
+              <span class="ed-chip" :class="company?.status === 'verified' ? 'ed-chip--green' : company?.status === 'pending_verification' ? 'ed-chip--yellow' : 'ed-chip--grey'">
+                {{ companyStatusLabel }}
+              </span>
+              <span class="ed-chip" :class="canCreateOpportunities ? 'ed-chip--blue' : 'ed-chip--grey'">
+                {{ canCreateOpportunities ? 'Публикация разрешена' : 'Публикация после проверки' }}
+              </span>
             </div>
-            <div class="metric-chip">
-              <span>Публикация</span>
-              <strong>{{ employerProfile?.can_create_opportunities ? 'Разрешена' : 'После проверки' }}</strong>
+            <div class="ed-hero-actions">
+              <RouterLink to="/profile" class="ed-btn ed-btn-white">Редактировать профиль</RouterLink>
             </div>
           </div>
         </div>
-        <div class="verification-card">
-          <div class="avatar-shell large">
-            <img
-              v-if="company?.avatar_url"
-              :src="company.avatar_url"
-              alt="Аватар компании"
-              class="avatar-image"
-            />
-            <span v-else class="avatar-fallback">{{ avatarFallback }}</span>
-          </div>
-          <strong>Статус: {{ companyStatusLabel }}</strong>
-          <div class="hero-side-actions">
-            <RouterLink to="/profile" class="ghost-button">Редактировать профиль</RouterLink>
-            <RouterLink to="/notifications" class="ghost-button">Уведомления</RouterLink>
-          </div>
-        </div>
+      </header>
+
+      <!-- Status banners -->
+      <div v-if="errorMessage" class="ed-banner ed-banner--error">{{ errorMessage }}</div>
+      <div v-else-if="infoMessage" class="ed-banner ed-banner--info">{{ infoMessage }}</div>
+      <div v-else-if="isLoading" class="ed-banner">
+        <span class="ed-spinner"></span> Загружаем кабинет…
       </div>
 
-      <p v-if="errorMessage" class="status-banner error">{{ errorMessage }}</p>
-      <p v-else-if="infoMessage" class="status-banner">{{ infoMessage }}</p>
-      <p v-else-if="isLoading" class="status-banner">Загружаем кабинет работодателя...</p>
-
-      <section class="dashboard-grid" :class="{ 'single-column': !canShowVerificationSection }">
-        <article class="section-card">
-          <div class="section-title">
+      <!-- Company + verification -->
+      <div class="ed-top-grid">
+        <!-- Company highlights -->
+        <div class="ed-card">
+          <div class="ed-card-header">
+            <p class="ed-kicker">Компания</p>
             <h2>Профиль компании</h2>
-            <p>Редактирование компании вынесено на отдельную страницу, чтобы кабинет оставался короче и чище.</p>
           </div>
-          <div class="editor-grid profile-summary-grid">
-            <div v-for="item in companyHighlights" :key="item.label" class="summary-card">
+          <div class="ed-highlights-grid">
+            <div v-for="item in companyHighlights" :key="item.label" class="ed-highlight">
               <span>{{ item.label }}</span>
               <strong>{{ item.value }}</strong>
             </div>
           </div>
-          <div class="summary-actions">
-            <RouterLink to="/profile" class="primary-button">Открыть страницу профиля</RouterLink>
-          </div>
-        </article>
-
-        <article v-if="canShowVerificationSection" class="section-card">
-          <div class="section-title">
-            <h2>Верификация компании</h2>
-            <p>Подтверждение работодателя выполняется только по ИНН компании.</p>
-          </div>
-          <form class="editor-grid" @submit.prevent="handleSubmitVerification">
-            <label class="field">
-              <span>ИНН</span>
-              <input v-model="verificationForm.inn" type="text" required />
-            </label>
-            <label class="field field-wide">
-              <span>Комментарий</span>
-              <textarea
-                v-model="verificationForm.comment"
-                rows="4"
-                placeholder="При необходимости добавьте комментарий для куратора"
-              />
-            </label>
-
-            <button class="primary-button" type="submit" :disabled="isSubmittingVerification">
-              {{ isSubmittingVerification ? 'Отправляем...' : 'Отправить на проверку' }}
-            </button>
-          </form>
-        </article>
-      </section>
-
-      <section v-if="canCreateOpportunities" class="dashboard-section">
-        <div class="section-heading opportunity-heading">
-          <div class="section-heading-copy">
-            <p class="eyebrow">Opportunity Studio</p>
-            <h2>Новая возможность</h2>
-            <p class="hero-copy">
-              Форма покрывает публикацию вакансии, стажировки, менторской программы или карьерного мероприятия.
-            </p>
-          </div>
+          <RouterLink to="/profile" class="ed-btn ed-btn-primary" style="margin-top:4px;align-self:start;">
+            Открыть настройки
+          </RouterLink>
         </div>
 
-        <div class="opportunity-layout">
-          <form class="opportunity-editor" @submit.prevent="handleCreateOpportunity">
-            <section class="opportunity-form-card">
-              <div class="form-card-header">
-                <div>
-                  <p class="form-card-eyebrow">Основа</p>
-                  <h3>Главная информация</h3>
-                </div>
-              </div>
-              <div class="editor-grid">
-                <label class="field">
-                  <span>Название позиции или мероприятия</span>
-                  <input v-model="opportunityForm.title" type="text" required />
+        <!-- Verification form -->
+        <div v-if="canShowVerificationSection" class="ed-card ed-card--verify">
+          <div class="ed-card-header">
+            <p class="ed-kicker">Верификация</p>
+            <h2>Подтверждение компании</h2>
+            <p class="ed-card-desc">Подтверждение выполняется по ИНН. После одобрения куратором откроется создание вакансий.</p>
+          </div>
+          <form class="ed-verify-form" @submit.prevent="handleSubmitVerification">
+            <label class="ed-field">
+              <span>ИНН компании</span>
+              <input v-model="verificationForm.inn" type="text" placeholder="7705043493" required />
+            </label>
+            <label class="ed-field">
+              <span>Комментарий <em>(необязательно)</em></span>
+              <textarea v-model="verificationForm.comment" rows="3" placeholder="Дополнительный комментарий для куратора" />
+            </label>
+            <button class="ed-btn ed-btn-primary" type="submit" :disabled="isSubmittingVerification">
+              {{ isSubmittingVerification ? 'Отправляем…' : 'Отправить на проверку' }}
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Opportunities: create form -->
+      <div v-if="canCreateOpportunities" class="ed-card">
+        <div class="ed-card-header">
+          <p class="ed-kicker">Новая позиция</p>
+          <h2>Создать возможность</h2>
+          <p class="ed-card-desc">Вакансия, стажировка, менторство или карьерное мероприятие.</p>
+        </div>
+
+        <div class="ed-opp-layout">
+          <form class="ed-opp-form" @submit.prevent="handleCreateOpportunity">
+
+            <div class="ed-form-section">
+              <p class="ed-form-section-title">Основная информация</p>
+              <div class="ed-fields">
+                <label class="ed-field">
+                  <span>Название *</span>
+                  <input v-model="opportunityForm.title" type="text" required placeholder="Senior Golang Developer" />
                 </label>
-                <label class="field">
-                  <span>Компания-работодатель или организатор</span>
+                <label class="ed-field">
+                  <span>Компания</span>
                   <input v-model="opportunityForm.companyName" type="text" readonly />
                 </label>
-                <label class="field">
+                <label class="ed-field">
                   <span>Тип</span>
                   <select v-model="opportunityForm.opportunityType">
-                    <option v-for="option in typeOptions" :key="option.value" :value="option.value">
-                      {{ option.label }}
-                    </option>
+                    <option v-for="o in typeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
                   </select>
                 </label>
-                <label class="field">
-                  <span>Формат работы</span>
+                <label class="ed-field">
+                  <span>Формат</span>
                   <select v-model="opportunityForm.workFormat">
-                    <option v-for="option in formatOptions" :key="option.value" :value="option.value">
-                      {{ option.label }}
-                    </option>
+                    <option v-for="o in formatOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
                   </select>
                 </label>
-                <label class="field">
-                  <span>Способ указания локации</span>
-                  <select v-model="opportunityForm.locationMode">
-                    <option v-for="option in locationModeOptions" :key="option.value" :value="option.value">
-                      {{ option.label }}
-                    </option>
-                  </select>
+                <label class="ed-field ed-field--full">
+                  <span>Краткое описание *</span>
+                  <textarea v-model="opportunityForm.shortDescription" rows="2" required placeholder="Коротко о задаче и ценности предложения" />
                 </label>
-                <label v-if="opportunityForm.locationMode === 'catalog'" class="field">
-                  <span>Локация из каталога</span>
-                  <select v-model="opportunityForm.locationId">
-                    <option v-for="location in locations" :key="location.id" :value="location.id">
-                      {{ location.display_text || location.id }}
-                    </option>
-                  </select>
-                  <small v-if="!locations.length" class="field-hint">
-                    Каталог локаций пуст. Переключитесь на режим "Своя точка".
-                  </small>
+                <label class="ed-field ed-field--full">
+                  <span>Полное описание *</span>
+                  <textarea v-model="opportunityForm.fullDescription" rows="5" required placeholder="Требования, задачи, условия работы" />
                 </label>
-                <label v-else class="field">
-                  <span>Адрес</span>
-                  <input
-                    v-model="opportunityForm.locationAddress"
-                    type="text"
-                    placeholder="Город, улица, дом или ориентир"
-                    required
-                  />
-                </label>
-                <label v-if="opportunityForm.locationMode === 'custom'" class="field field-wide">
-                  <span>Подпись точки</span>
-                  <input
-                    v-model="opportunityForm.locationDisplayText"
-                    type="text"
-                    placeholder="Например: Москва, офис компании"
-                  />
-                </label>
-                <label v-if="opportunityForm.locationMode === 'custom'" class="field">
-                  <span>Широта</span>
-                  <input v-model="opportunityForm.locationLatitude" type="number" min="-90" max="90" step="0.000001" required />
-                </label>
-                <label v-if="opportunityForm.locationMode === 'custom'" class="field">
-                  <span>Долгота</span>
-                  <input
-                    v-model="opportunityForm.locationLongitude"
-                    type="number"
-                    min="-180"
-                    max="180"
-                    step="0.000001"
-                    required
-                  />
-                </label>
-                <label class="field">
-                  <span>Статус публикации</span>
-                  <select v-model="opportunityForm.status">
-                    <option v-for="option in statusOptions" :key="option.value" :value="option.value">
-                      {{ option.label }}
-                    </option>
-                  </select>
-                </label>
-                <label class="field field-wide">
-                  <span>Краткое описание</span>
-                  <textarea
-                    v-model="opportunityForm.shortDescription"
-                    rows="3"
-                    required
-                    placeholder="Кратко опишите задачу, направление и ценность предложения."
-                  />
-                </label>
-                <label class="field field-wide">
-                  <span>Полное описание</span>
-                  <textarea
-                    v-model="opportunityForm.fullDescription"
-                    rows="6"
-                    placeholder="Полное описание программы, роли или события."
-                    required
-                  />
-                </label>
-                <div class="field field-wide map-picker-field">
-                  <span>Точка на карте</span>
-                  <MapLibreOpportunityMap
-                    :latitude="previewLocationLatitude"
-                    :longitude="previewLocationLongitude"
-                    :label="previewLocationLabel || 'Точка локации'"
-                    :selectable="opportunityForm.locationMode === 'custom'"
-                    @select="handleLocationSelect"
-                  />
-                </div>
               </div>
-            </section>
+            </div>
 
-            <section class="opportunity-form-card">
-              <div class="form-card-header">
-                <div>
-                  <p class="form-card-eyebrow">Условия</p>
-                  <h3>Сроки и контакты</h3>
+            <div class="ed-form-section">
+              <p class="ed-form-section-title">Локация</p>
+              <div class="ed-fields">
+                <label class="ed-field">
+                  <span>Способ</span>
+                  <select v-model="opportunityForm.locationMode">
+                    <option v-for="o in locationModeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+                  </select>
+                </label>
+                <label v-if="opportunityForm.locationMode === 'catalog'" class="ed-field">
+                  <span>Из каталога</span>
+                  <select v-model="opportunityForm.locationId">
+                    <option v-for="loc in locations" :key="loc.id" :value="loc.id">{{ loc.display_text || loc.address_line }}</option>
+                  </select>
+                  <small v-if="!locations.length" class="ed-hint-text">Каталог пуст — выберите «Своя точка»</small>
+                </label>
+                <label v-else class="ed-field">
+                  <span>Адрес *</span>
+                  <input v-model="opportunityForm.locationAddress" type="text" placeholder="Город, улица, дом" required />
+                </label>
+                <template v-if="opportunityForm.locationMode === 'custom'">
+                  <label class="ed-field ed-field--full">
+                    <span>Подпись точки</span>
+                    <input v-model="opportunityForm.locationDisplayText" type="text" placeholder="Москва, офис компании" />
+                  </label>
+                  <label class="ed-field">
+                    <span>Широта</span>
+                    <input v-model="opportunityForm.locationLatitude" type="number" min="-90" max="90" step="0.000001" required />
+                  </label>
+                  <label class="ed-field">
+                    <span>Долгота</span>
+                    <input v-model="opportunityForm.locationLongitude" type="number" min="-180" max="180" step="0.000001" required />
+                  </label>
+                </template>
+                <div class="ed-field ed-field--full">
+                  <span>Точка на карте</span>
+                  <div class="ed-map-wrap">
+                    <MapLibreOpportunityMap
+                      :latitude="previewLocationLatitude"
+                      :longitude="previewLocationLongitude"
+                      :label="previewLocationLabel || 'Точка локации'"
+                      :selectable="opportunityForm.locationMode === 'custom'"
+                      @select="handleLocationSelect"
+                    />
+                  </div>
                 </div>
-                <span class="form-card-note">Общие поля, которые есть у всех типов возможностей</span>
               </div>
-              <div class="editor-grid">
-                <label class="field">
-                  <span>Дедлайн подачи заявки</span>
+            </div>
+
+            <div class="ed-form-section">
+              <p class="ed-form-section-title">Сроки и контакты</p>
+              <div class="ed-fields">
+                <label class="ed-field">
+                  <span>Дедлайн подачи</span>
                   <input v-model="opportunityForm.applicationDeadline" type="datetime-local" />
                 </label>
-                <label class="field">
-                  <span>Срок действия публикации</span>
+                <label class="ed-field">
+                  <span>Срок публикации</span>
                   <input v-model="opportunityForm.expiresAt" type="datetime-local" />
                 </label>
-                <label class="field field-wide">
-                  <span>Контакты работодателя</span>
-                  <textarea
-                    v-model="opportunityForm.contactsInfo"
-                    rows="4"
-                    placeholder="Email, Telegram, телефон или краткая инструкция по связи"
-                  />
+                <label class="ed-field ed-field--full">
+                  <span>Контакты</span>
+                  <textarea v-model="opportunityForm.contactsInfo" rows="3" placeholder="Email, Telegram, телефон" />
                 </label>
-                <label class="field field-wide">
+                <label class="ed-field ed-field--full">
                   <span>Внешняя ссылка</span>
-                  <input
-                    v-model="opportunityForm.externalUrl"
-                    type="url"
-                    placeholder="Ссылка на лендинг, форму отклика или страницу компании"
-                  />
+                  <input v-model="opportunityForm.externalUrl" type="url" placeholder="https://company.ru/vacancy" />
                 </label>
               </div>
-            </section>
+            </div>
 
-            <section class="opportunity-form-card">
-              <div class="form-card-header">
-                <div>
-                  <p class="form-card-eyebrow">По типу</p>
-                  <h3>Поля для {{ typeOptions.find((item) => item.value === opportunityForm.opportunityType)?.label }}</h3>
-                </div>
-                <span class="form-card-note">{{ currentOpportunityTypeConfig.note }}</span>
-              </div>
-              <div class="editor-grid">
+            <div v-if="currentOpportunityTypeConfig.showVacancyFields || currentOpportunityTypeConfig.showSalaryFields || currentOpportunityTypeConfig.showEventFields" class="ed-form-section">
+              <p class="ed-form-section-title">
+                Параметры для «{{ typeOptions.find((o) => o.value === opportunityForm.opportunityType)?.label }}»
+              </p>
+              <div class="ed-fields">
                 <template v-if="currentOpportunityTypeConfig.showVacancyFields">
-                  <label class="field">
-                    <span>Уровень вакансии</span>
+                  <label class="ed-field">
+                    <span>Уровень</span>
                     <select v-model="opportunityForm.vacancyLevel">
                       <option value="intern">Intern</option>
                       <option value="junior">Junior</option>
@@ -1030,26 +994,23 @@ watch(
                       <option value="senior">Senior</option>
                     </select>
                   </label>
-                  <label class="field">
-                    <span>Тип занятости</span>
+                  <label class="ed-field">
+                    <span>Занятость</span>
                     <select v-model="opportunityForm.employmentType">
-                      <option v-for="option in employmentOptions" :key="option.value" :value="option.value">
-                        {{ option.label }}
-                      </option>
+                      <option v-for="o in employmentOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
                     </select>
                   </label>
                 </template>
-
                 <template v-if="currentOpportunityTypeConfig.showSalaryFields">
-                  <label class="field">
+                  <label class="ed-field">
                     <span>Зарплата от</span>
-                    <input v-model="opportunityForm.salaryMin" type="number" min="0" />
+                    <input v-model="opportunityForm.salaryMin" type="number" min="0" placeholder="100 000" />
                   </label>
-                  <label class="field">
+                  <label class="ed-field">
                     <span>Зарплата до</span>
-                    <input v-model="opportunityForm.salaryMax" type="number" min="0" />
+                    <input v-model="opportunityForm.salaryMax" type="number" min="0" placeholder="200 000" />
                   </label>
-                  <label class="field">
+                  <label class="ed-field">
                     <span>Валюта</span>
                     <select v-model="opportunityForm.salaryCurrency">
                       <option value="RUB">RUB</option>
@@ -1057,308 +1018,457 @@ watch(
                       <option value="EUR">EUR</option>
                     </select>
                   </label>
-                  <label class="field checkbox-field">
-                    <span>Показывать зарплату</span>
+                  <label class="ed-field ed-checkbox-label">
                     <input v-model="opportunityForm.isSalaryVisible" type="checkbox" />
+                    <span>Показывать зарплату</span>
                   </label>
                 </template>
-
                 <template v-if="currentOpportunityTypeConfig.showEventFields">
-                  <label class="field">
+                  <label class="ed-field">
                     <span>Начало мероприятия</span>
                     <input v-model="opportunityForm.eventStartAt" type="datetime-local" />
                   </label>
-                  <label class="field">
-                    <span>Завершение мероприятия</span>
+                  <label class="ed-field">
+                    <span>Завершение</span>
                     <input v-model="opportunityForm.eventEndAt" type="datetime-local" />
                   </label>
                 </template>
               </div>
-            </section>
+            </div>
 
-            <section class="opportunity-form-card">
-              <div class="form-card-header">
-                <div>
-                  <p class="form-card-eyebrow">Теги</p>
-                  <h3>Категории и стек</h3>
-                </div>
-                <span class="form-card-note">Помогают фильтрации и поиску кандидатов</span>
+            <div v-if="technologyTags.length" class="ed-form-section">
+              <p class="ed-form-section-title">Технологии</p>
+              <div class="ed-tags-grid">
+                <label v-for="tag in technologyTags" :key="tag.id" class="ed-tag-check">
+                  <input v-model="opportunityForm.selectedTechnologyTagIds" type="checkbox" :value="tag.id" />
+                  <span>{{ tag.name }}</span>
+                </label>
               </div>
-              <div class="editor-grid">
-                <div class="field field-wide">
-                  <span>Технологии</span>
-                  <div class="checkbox-grid">
-                    <label v-for="tag in technologyTags" :key="tag.id" class="checkbox-item">
-                      <input v-model="opportunityForm.selectedTechnologyTagIds" type="checkbox" :value="tag.id" />
-                      <span>{{ tag.name }}</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </section>
+            </div>
 
-            <div class="opportunity-actions">
-              <button class="primary-button" type="submit" :disabled="isSubmittingOpportunity">
-                {{ isSubmittingOpportunity ? 'Создаем...' : 'Создать возможность' }}
+            <div class="ed-form-actions">
+              <button class="ed-btn ed-btn-primary" type="submit" :disabled="isSubmittingOpportunity">
+                {{ isSubmittingOpportunity ? 'Создаём…' : 'Создать возможность' }}
               </button>
             </div>
           </form>
 
-          <aside class="preview-card">
-            <div class="preview-header">
-              <div>
-                <p class="eyebrow">Предпросмотр</p>
-                <h3>{{ opportunityForm.title || 'Название будущей карточки' }}</h3>
-                <p class="hero-copy">
-                  {{ opportunityForm.companyName || 'Компания появится после заполнения профиля' }}
-                </p>
-              </div>
-              <div class="preview-badges">
-                <span class="tag-pill">{{ typeOptions.find((item) => item.value === opportunityForm.opportunityType)?.label }}</span>
-                <span class="tag-pill soft">{{ formatOptions.find((item) => item.value === opportunityForm.workFormat)?.label }}</span>
-              </div>
+          <!-- Preview -->
+          <aside class="ed-preview">
+            <p class="ed-kicker">Предпросмотр</p>
+            <h3 class="ed-preview-title">{{ opportunityForm.title || 'Название позиции' }}</h3>
+            <p class="ed-preview-company">{{ opportunityForm.companyName }}</p>
+            <div class="ed-preview-chips">
+              <span class="ed-chip ed-chip--blue">{{ typeOptions.find((o) => o.value === opportunityForm.opportunityType)?.label }}</span>
+              <span class="ed-chip ed-chip--grey">{{ formatOptions.find((o) => o.value === opportunityForm.workFormat)?.label }}</span>
             </div>
-
-            <div class="preview-grid">
-              <div>
-                <strong>Описание</strong>
-                <p>{{ opportunityForm.shortDescription || 'Краткое описание пока не заполнено.' }}</p>
+            <div class="ed-preview-fields">
+              <div class="ed-preview-field">
+                <span>Описание</span>
+                <p>{{ opportunityForm.shortDescription || 'Не заполнено' }}</p>
               </div>
-              <div>
-                <strong>Полное описание</strong>
-                <p>{{ opportunityForm.fullDescription || 'Полное описание пока не заполнено.' }}</p>
+              <div class="ed-preview-field">
+                <span>Место</span>
+                <p>{{ previewLocationLabel || previewLocationAddress || 'Не указано' }}</p>
               </div>
-              <div>
-                <strong>Место</strong>
-                <p>
-                  {{
-                    [previewLocationLabel, previewLocationAddress, `Координаты: ${previewLocationLatitude}, ${previewLocationLongitude}`]
-                      .filter(Boolean)
-                      .join(' • ') || 'Локация не указана.'
-                  }}
-                </p>
+              <div v-if="previewTagGroups.length" class="ed-preview-field">
+                <span>Теги</span>
+                <p>{{ previewTagGroups.join(', ') }}</p>
               </div>
-              <div>
-                <strong>Даты</strong>
-                <p>{{ [opportunityForm.applicationDeadline && `Подача до: ${opportunityForm.applicationDeadline}`, opportunityForm.expiresAt && `Публикация до: ${opportunityForm.expiresAt}`, currentOpportunityTypeConfig.showEventFields && opportunityForm.eventStartAt && `Старт: ${opportunityForm.eventStartAt}`, currentOpportunityTypeConfig.showEventFields && opportunityForm.eventEndAt && `Финиш: ${opportunityForm.eventEndAt}`].filter(Boolean).join(' • ') || 'Даты пока не заполнены.' }}</p>
-              </div>
-              <div>
-                <strong>Контакты и ссылка</strong>
-                <p>{{ [opportunityForm.contactsInfo, opportunityForm.externalUrl].filter(Boolean).join(' • ') || 'Контакты и ссылка пока не указаны.' }}</p>
-              </div>
-              <div v-if="currentOpportunityTypeConfig.showSalaryFields">
-                <strong>Зарплата</strong>
-                <p>{{ [opportunityForm.salaryMin && `от ${opportunityForm.salaryMin}`, opportunityForm.salaryMax && `до ${opportunityForm.salaryMax}`, opportunityForm.salaryCurrency, opportunityForm.isSalaryVisible ? 'видна' : 'скрыта'].filter(Boolean).join(' • ') || 'Зарплата пока не указана.' }}</p>
-              </div>
-              <div>
-                <strong>Теги</strong>
-                <p>{{ previewTagGroups.join(', ') || 'Выберите технологии и параметры возможности.' }}</p>
+              <div v-if="currentOpportunityTypeConfig.showSalaryFields && (opportunityForm.salaryMin || opportunityForm.salaryMax)" class="ed-preview-field">
+                <span>Зарплата</span>
+                <p>{{ [opportunityForm.salaryMin && `от ${opportunityForm.salaryMin}`, opportunityForm.salaryMax && `до ${opportunityForm.salaryMax}`, opportunityForm.salaryCurrency].filter(Boolean).join(' ') }}</p>
               </div>
             </div>
           </aside>
         </div>
-      </section>
+      </div>
 
-      <section v-else class="dashboard-section">
-        <div class="section-heading-copy">
-          <p class="eyebrow">Opportunity Studio</p>
+      <!-- Locked create -->
+      <div v-else class="ed-card ed-card--locked">
+        <div class="ed-card-header">
+          <p class="ed-kicker">Публикация заблокирована</p>
           <h2>Новая возможность</h2>
-          <p class="hero-copy">
-            Создание возможностей станет доступно после подтверждения компании куратором.
-          </p>
         </div>
-        <div class="locked-state">
-          <strong>Публикация пока заблокирована</strong>
-          <p>
-            Сначала заполните профиль компании и отправьте заявку на верификацию. После статуса
-            `verified` откроется форма создания вакансий, стажировок, менторских программ и событий.
-          </p>
-        </div>
-      </section>
+        <p class="ed-muted">Создание вакансий и стажировок станет доступно после того, как куратор подтвердит компанию. Сначала заполните профиль и отправьте верификацию.</p>
+      </div>
 
-      <section class="dashboard-section">
-        <div class="section-heading">
-          <div class="section-heading-copy">
-            <h2>Активные, закрытые и запланированные возможности</h2>
-            <p class="hero-copy">Открывайте отклики по каждой карточке, меняйте статусы и отправляйте приглашения кандидатам.</p>
+      <!-- My opportunities -->
+      <div class="ed-card">
+        <div class="ed-card-header">
+          <div>
+            <p class="ed-kicker">Мои публикации</p>
+            <h2>Активные возможности</h2>
           </div>
+          <span v-if="employerOpportunities.length" class="ed-count-badge">{{ employerOpportunities.length }}</span>
         </div>
-        <p v-if="!employerOpportunities.length" class="hero-copy">
-          У компании пока нет опубликованных карточек или API вернул пустой список.
-        </p>
-        <div class="managed-opportunity-list">
-          <article
+
+        <div v-if="!employerOpportunities.length" class="ed-empty">
+          <span>📋</span>
+          <p>Опубликованных карточек пока нет.</p>
+        </div>
+
+        <div v-else class="ed-opp-list">
+          <div
             v-for="opportunity in employerOpportunities"
             :key="opportunity.id"
-            class="managed-opportunity-card"
+            class="ed-opp-row"
+            :class="{ 'ed-opp-row--active': selectedOpportunityId === opportunity.id }"
           >
-            <OpportunityCard :opportunity="opportunity" compact />
-            <div class="managed-opportunity-actions">
-              <button class="ghost-button" type="button" @click="openApplications(opportunity)">
-                {{ selectedOpportunityId === opportunity.id ? 'Обновить отклики' : 'Отклики' }}
-              </button>
-              <span class="managed-opportunity-meta">{{ opportunity.type }} • {{ opportunity.status }}</span>
+            <div class="ed-opp-info">
+              <div class="ed-opp-title-row">
+                <strong class="ed-opp-title">{{ opportunity.title }}</strong>
+                <span class="ed-chip ed-chip--sm" :class="opportunity.status === 'active' ? 'ed-chip--green' : 'ed-chip--grey'">
+                  {{ getOpportunityStatusLabel(opportunity.status) }}
+                </span>
+                <span class="ed-chip ed-chip--sm ed-chip--grey">{{ formatOpportunityType(opportunity.type) }}</span>
+              </div>
+              <span class="ed-opp-meta">{{ opportunity.companyName }} · {{ formatWorkFormat(opportunity.workFormat) }}</span>
             </div>
-          </article>
+            <div class="ed-opp-actions">
+              <button
+                class="ed-btn ed-btn-ghost ed-btn-sm"
+                type="button"
+                @click="openApplications(opportunity)"
+              >
+                {{ selectedOpportunityId === opportunity.id ? 'Обновить' : 'Отклики' }}
+                <span v-if="selectedOpportunityId === opportunity.id && opportunityApplications.length" class="ed-count-badge ed-count-badge--sm">{{ opportunityApplications.length }}</span>
+              </button>
+              <button
+                v-if="opportunity.type === 'vacancy'"
+                class="ed-btn ed-btn-ghost ed-btn-sm"
+                type="button"
+                :disabled="isLoadingAnalysis && analysisOpportunityId === opportunity.id"
+                @click="handleRequestAnalysis(opportunity.id)"
+              >
+                <span v-if="isLoadingAnalysis && analysisOpportunityId === opportunity.id" class="ed-spinner ed-spinner--xs"></span>
+                {{ isLoadingAnalysis && analysisOpportunityId === opportunity.id ? 'Анализируем…' : 'ИИ-анализ' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI analysis panel -->
+      <div v-if="opportunityAnalysis" class="ed-card ed-card--ai">
+        <div class="ed-card-header">
+          <div>
+            <p class="ed-kicker">ИИ-анализ</p>
+            <h2>Анализ вакансии</h2>
+            <p class="ed-muted" style="margin-top:4px;">Сгенерировано {{ formatDate(opportunityAnalysis.generated_at) }}</p>
+          </div>
+          <button class="ed-btn ed-btn-ghost ed-btn-sm" type="button" @click="opportunityAnalysis = null">Скрыть</button>
+        </div>
+        <div class="ed-ai-body" v-html="sanitizeHtml(opportunityAnalysis.analysis)" />
+      </div>
+
+      <!-- Applications panel -->
+      <div v-if="selectedOpportunityId" class="ed-card">
+        <div class="ed-card-header">
+          <div>
+            <p class="ed-kicker">Отклики</p>
+            <h2>{{ selectedOpportunityTitle }}</h2>
+          </div>
+          <button class="ed-btn ed-btn-ghost ed-btn-sm" type="button" @click="closeApplications">Закрыть</button>
         </div>
 
-        <article v-if="selectedOpportunityId" class="applications-panel">
-          <div class="applications-panel-head">
-            <div>
-              <p class="eyebrow">Applications</p>
-              <h3>{{ selectedOpportunityTitle }}</h3>
-              <p class="hero-copy">Просмотр откликов и приглашений по выбранной возможности.</p>
+        <!-- Filter chips -->
+        <div class="ed-filters">
+          <button
+            v-for="chip in applicationFilterChips"
+            :key="chip.value"
+            type="button"
+            class="ed-filter-chip"
+            :class="{ active: activeApplicationFilter === chip.value }"
+            @click="activeApplicationFilter = chip.value"
+          >
+            {{ chip.label }} <span class="ed-filter-count">{{ chip.count }}</span>
+          </button>
+        </div>
+
+        <div v-if="applicationsError" class="ed-banner ed-banner--error">{{ applicationsError }}</div>
+        <div v-else-if="isApplicationsLoading" class="ed-banner"><span class="ed-spinner"></span> Загружаем отклики…</div>
+        <div v-else-if="!filteredApplications.length" class="ed-empty"><p>Откликов по этому фильтру нет.</p></div>
+
+        <div v-else class="ed-app-list">
+          <div v-for="application in filteredApplications" :key="application.id" class="ed-app-card">
+
+            <!-- Applicant row -->
+            <div class="ed-app-head">
+              <div class="ed-app-person">
+                <div class="ed-app-avatar">
+                  <img v-if="getApplicationAvatar(application)" :src="getApplicationAvatar(application)" alt="" />
+                  <span v-else>{{ getApplicationInitials(application) }}</span>
+                </div>
+                <div class="ed-app-name">
+                  <strong>{{ application.student_display_name || 'Соискатель' }}</strong>
+                  <span>{{ application.resume_id ? 'Резюме приложено' : 'Без резюме' }}</span>
+                </div>
+              </div>
+              <span class="ed-app-status" :class="`ed-status--${application.status || 'submitted'}`">
+                {{ getApplicationStatusLabel(application.status) }}
+              </span>
             </div>
-            <button class="ghost-button" type="button" @click="closeApplications">Скрыть</button>
-          </div>
 
-          <div class="filter-row">
-            <button
-              v-for="chip in applicationFilterChips"
-              :key="chip.value"
-              type="button"
-              class="filter-chip"
-              :class="{ active: activeApplicationFilter === chip.value }"
-              @click="activeApplicationFilter = chip.value"
-            >
-              {{ chip.label }} · {{ chip.count }}
-            </button>
-          </div>
-
-          <p v-if="applicationsError" class="status-banner error">{{ applicationsError }}</p>
-          <p v-else-if="isApplicationsLoading" class="status-banner">Загружаем отклики...</p>
-          <p v-else-if="!filteredApplications.length" class="status-banner">Для этого фильтра откликов нет.</p>
-
-          <div v-else class="applications-list">
-            <article
-              v-for="application in filteredApplications"
-              :key="application.id"
-              class="application-card"
-            >
-              <div class="application-head">
-                <div class="application-user">
-                  <div class="application-avatar">
-                    <img
-                      v-if="getApplicationAvatar(application)"
-                      :src="getApplicationAvatar(application)"
-                      alt="Аватар студента"
-                      class="avatar-image"
-                    />
-                    <span v-else class="avatar-fallback">{{ getApplicationInitials(application) }}</span>
-                  </div>
-                  <div class="application-copy">
-                    <strong>{{ application.student_user_id || 'student_user_id не указан' }}</strong>
-                    <span>{{ application.resume_id ? `Резюме: ${application.resume_id}` : 'Резюме не приложено' }}</span>
-                  </div>
-                </div>
-                <span class="application-status" :class="`status-${application.status || 'submitted'}`">
-                  {{ getApplicationStatusLabel(application.status) }}
-                </span>
+            <!-- Cover letter + date -->
+            <div class="ed-app-body">
+              <div class="ed-app-detail">
+                <span>Сопроводительное письмо</span>
+                <p>{{ application.cover_letter || 'Письмо не добавлено.' }}</p>
               </div>
-
-              <div class="application-grid">
-                <div class="application-detail">
-                  <span>Сопроводительное письмо</span>
-                  <p>{{ application.cover_letter || 'Кандидат не добавил сопроводительное письмо.' }}</p>
-                </div>
-                <div class="application-detail">
-                  <span>Создан</span>
-                  <p>{{ application.created_at ? formatDate(application.created_at) : 'Дата не указана' }}</p>
-                </div>
+              <div class="ed-app-detail">
+                <span>Дата отклика</span>
+                <p>{{ application.created_at ? formatDate(application.created_at) : '—' }}</p>
               </div>
+            </div>
 
-              <div class="application-actions">
-                <button
-                  class="primary-button"
-                  type="button"
-                  :disabled="openingChatApplicationId === application.id || !application.student_user_id"
-                  @click="handleOpenApplicantChat(application)"
-                >
-                  {{ openingChatApplicationId === application.id ? 'Открываем чат...' : 'Открыть чат' }}
-                </button>
-                <RouterLink
-                  v-if="application.student_user_id"
-                  :to="`/profiles/students/${application.student_user_id}`"
-                  class="ghost-button"
-                  @click="saveApplicantPreview(application)"
-                >
-                  Профиль кандидата
-                </RouterLink>
-                <button
-                  class="ghost-button"
-                  type="button"
-                  :disabled="updatingApplicationId === application.id"
-                  @click="handleApplicationStatusChange(application, 'in_review')"
-                >
-                  Взять в работу
-                </button>
-                <button
-                  class="ghost-button"
-                  type="button"
-                  :disabled="updatingApplicationId === application.id"
-                  @click="handleApplicationStatusChange(application, 'accepted')"
-                >
-                  Принять
-                </button>
-                <button
-                  class="ghost-button"
-                  type="button"
-                  :disabled="updatingApplicationId === application.id"
-                  @click="handleApplicationStatusChange(application, 'rejected')"
-                >
-                  Отклонить
-                </button>
-                <button
-                  class="ghost-button"
-                  type="button"
-                  :disabled="updatingApplicationId === application.id"
-                  @click="handleApplicationStatusChange(application, 'reserve')"
-                >
-                  В резерв
-                </button>
-                <button class="primary-button" type="button" @click="openInviteForm(application)">
-                  Пригласить
-                </button>
-              </div>
-
-              <form
-                v-if="inviteTargetApplicationId === application.id"
-                class="invite-form"
-                @submit.prevent="handleSendInvitation"
+            <!-- Actions -->
+            <div class="ed-app-actions">
+              <button
+                class="ed-btn ed-btn-primary ed-btn-sm"
+                type="button"
+                :disabled="openingChatApplicationId === application.id || !application.student_user_id"
+                @click="handleOpenApplicantChat(application)"
               >
-                <label class="field">
-                  <span>ID пользователя</span>
-                  <input v-model="inviteForm.toUserId" type="text" required />
-                </label>
-                <label class="field">
-                  <span>ID возможности</span>
-                  <input v-model="inviteForm.opportunityId" type="text" required />
-                </label>
-                <label class="field field-wide">
-                  <span>Сообщение</span>
-                  <textarea
-                    v-model="inviteForm.message"
-                    rows="3"
-                    placeholder="Приглашаем вас рассмотреть нашу вакансию"
-                  />
-                </label>
-                <p v-if="invitationError" class="inline-error">{{ invitationError }}</p>
-                <div class="invite-actions">
-                  <button class="primary-button" type="submit" :disabled="isSendingInvitation">
-                    {{ isSendingInvitation ? 'Отправляем...' : 'Отправить приглашение' }}
-                  </button>
-                  <button class="ghost-button" type="button" @click="closeInviteForm">Отмена</button>
-                </div>
-              </form>
-            </article>
+                {{ openingChatApplicationId === application.id ? '…' : 'Написать' }}
+              </button>
+              <RouterLink
+                v-if="application.student_user_id"
+                :to="`/profiles/students/${application.student_user_id}`"
+                class="ed-btn ed-btn-ghost ed-btn-sm"
+                @click="saveApplicantPreview(application)"
+              >
+                Профиль
+              </RouterLink>
+              <button class="ed-btn ed-btn-ghost ed-btn-sm" type="button" :disabled="updatingApplicationId === application.id" @click="handleApplicationStatusChange(application, 'in_review')">В работу</button>
+              <button class="ed-btn ed-btn-ghost ed-btn-sm" type="button" :disabled="updatingApplicationId === application.id" @click="handleApplicationStatusChange(application, 'accepted')">Принять</button>
+              <button class="ed-btn ed-btn-ghost ed-btn-sm" type="button" :disabled="updatingApplicationId === application.id" @click="handleApplicationStatusChange(application, 'rejected')">Отклонить</button>
+              <button class="ed-btn ed-btn-ghost ed-btn-sm" type="button" :disabled="updatingApplicationId === application.id" @click="handleApplicationStatusChange(application, 'reserve')">В резерв</button>
+              <button class="ed-btn ed-btn-outline-blue ed-btn-sm" type="button" @click="openInviteForm(application)">Пригласить</button>
+            </div>
+
+            <!-- Invite form -->
+            <form v-if="inviteTargetApplicationId === application.id" class="ed-invite-form" @submit.prevent="handleSendInvitation">
+              <p class="ed-invite-to">Приглашение для: <strong>{{ application.student_display_name || 'Соискателя' }}</strong></p>
+              <label class="ed-field ed-field--full">
+                <span>Сообщение</span>
+                <textarea v-model="inviteForm.message" rows="3" placeholder="Приглашаем вас рассмотреть нашу вакансию…" />
+              </label>
+              <p v-if="invitationError" class="ed-inline-error">{{ invitationError }}</p>
+              <div class="ed-invite-actions">
+                <button class="ed-btn ed-btn-primary ed-btn-sm" type="submit" :disabled="isSendingInvitation">
+                  {{ isSendingInvitation ? 'Отправляем…' : 'Отправить приглашение' }}
+                </button>
+                <button class="ed-btn ed-btn-ghost ed-btn-sm" type="button" @click="closeInviteForm">Отмена</button>
+              </div>
+            </form>
+
           </div>
-        </article>
-      </section>
-    </section>
+        </div>
+      </div>
+
+    </div>
   </main>
 </template>
 
 <style scoped>
+/* ─── new styles ─────────────────────────────────────────────────── */
+.ed-root { display: grid; gap: 20px; max-width: 1180px; margin: 0 auto; }
+
+/* Hero */
+.ed-hero { border-radius: 20px; border: 1px solid rgba(18,38,63,.08); background: var(--surface); box-shadow: 0 4px 24px rgba(15,23,42,.06); overflow: hidden; }
+.ed-cover { height: 130px; background: linear-gradient(135deg, #0f2c7a 0%, #1d4ed8 50%, #60a5fa 100%); }
+.ed-hero-body { display: flex; gap: 20px; align-items: flex-start; padding: 0 28px 24px; }
+.ed-co-avatar { width: 80px; height: 80px; border-radius: 16px; border: 4px solid #fff; overflow: hidden; flex-shrink: 0; margin-top: -32px; background: var(--surface-muted); box-shadow: 0 4px 16px rgba(15,23,42,.12); display: flex; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: 800; color: #fff; background: linear-gradient(135deg, #1e40af, #3b82f6); }
+.ed-co-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.ed-identity { display: grid; gap: 6px; flex: 1; min-width: 0; padding-top: 10px; }
+.ed-eyebrow { margin: 0; font: 700 0.65rem/1 var(--font-mono,monospace); text-transform: uppercase; letter-spacing: .1em; color: #3b82f6; }
+.ed-company-name { margin: 0; font-family: var(--font-heading); font-size: clamp(1.4rem,2.5vw,1.9rem); color: var(--text); line-height: 1.1; }
+.ed-company-desc { margin: 0; font-size: 0.86rem; color: var(--muted); line-height: 1.5; max-width: 500px; }
+.ed-hero-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ed-hero-actions { display: flex; gap: 8px; margin-top: 2px; }
+
+/* Chips */
+.ed-chip { height: 22px; padding: 0 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 700; display: inline-flex; align-items: center; }
+.ed-chip--green { background: var(--chip-green); color: var(--success); }
+.ed-chip--yellow { background: #fef9c3; color: #854d0e; }
+.ed-chip--blue { background: var(--chip-blue); color: var(--chip-blue-text); }
+.ed-chip--grey { background: var(--surface-muted); color: var(--muted); }
+.ed-chip--sm { height: 18px; padding: 0 7px; font-size: 0.66rem; }
+
+/* Banner */
+.ed-banner { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); font-size: 0.87rem; color: var(--muted); }
+.ed-banner--error { border-color: var(--border-red); background: var(--surface-red); color: #991b1b; }
+.ed-banner--info { border-color: var(--border-green); background: var(--surface-green); color: var(--success); }
+
+/* Spinner */
+.ed-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: spin .7s linear infinite; flex-shrink: 0; }
+.ed-spinner--xs { width: 11px; height: 11px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Cards */
+.ed-card { padding: 20px 24px; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: 0 2px 10px rgba(15,23,42,.04); display: grid; gap: 16px; }
+.ed-card--verify { border-color: var(--border-blue); background: var(--surface-blue); }
+.ed-card--locked { border-color: var(--border); background: var(--surface-strong); }
+.ed-card--ai { border-color: var(--border-ai); background: var(--surface-ai); }
+
+.ed-card-header { display: grid; gap: 3px; }
+.ed-card-header h2 { margin: 0; font-family: var(--font-heading); font-size: 1.1rem; color: var(--text); }
+.ed-kicker { margin: 0; font: 700 0.65rem/1 var(--font-mono,monospace); text-transform: uppercase; letter-spacing: .1em; color: #3b82f6; }
+.ed-card-desc { margin: 0; font-size: 0.82rem; color: var(--muted); line-height: 1.5; max-width: 52ch; }
+.ed-muted { margin: 0; font-size: 0.86rem; color: var(--muted); line-height: 1.6; }
+
+/* Top grid (company + verification) */
+.ed-top-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+
+/* Company highlights */
+.ed-highlights-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+.ed-highlight { display: grid; gap: 3px; padding: 10px 12px; border-radius: 10px; background: var(--surface-strong); border: 1px solid #f1f5f9; }
+.ed-highlight span { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--border-strong); }
+.ed-highlight strong { font-size: 0.82rem; font-weight: 600; color: var(--text); line-height: 1.3; }
+
+/* Verification form */
+.ed-verify-form { display: grid; gap: 10px; }
+
+/* Fields */
+.ed-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.ed-field { display: grid; gap: 5px; }
+.ed-field--full { grid-column: 1 / -1; }
+.ed-field > span { font-size: 0.78rem; font-weight: 600; color: var(--muted); }
+.ed-field em { font-weight: 400; color: var(--border-strong); font-style: normal; }
+.ed-hint-text { font-size: 0.75rem; color: var(--border-strong); }
+.ed-field input, .ed-field select, .ed-field textarea {
+  min-height: 40px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface-strong);
+  font: inherit; font-size: 0.875rem; color: var(--text); outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.ed-field input:focus, .ed-field select:focus, .ed-field textarea:focus {
+  border-color: #3b82f6; background: var(--surface); box-shadow: 0 0 0 3px rgba(59,130,246,.1);
+}
+.ed-field textarea { min-height: 88px; padding: 10px 12px; resize: vertical; }
+.ed-checkbox-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.84rem; color: var(--text); align-self: end; padding-bottom: 10px; }
+.ed-checkbox-label input { width: 15px; height: 15px; accent-color: #2563eb; margin: 0; cursor: pointer; }
+
+/* Opportunity create layout */
+.ed-opp-layout { display: grid; grid-template-columns: minmax(0,1fr) 280px; gap: 20px; align-items: start; }
+.ed-opp-form { display: grid; gap: 14px; }
+.ed-form-section { display: grid; gap: 12px; padding: 16px 18px; border: 1px solid #f1f5f9; border-radius: 14px; background: var(--surface-strong); }
+.ed-form-section-title { margin: 0; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: #3b82f6; }
+.ed-form-actions { display: flex; gap: 8px; padding-top: 4px; }
+.ed-map-wrap { border-radius: 12px; overflow: hidden; height: 220px; margin-top: 4px; }
+
+/* Tags */
+.ed-tags-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.ed-tag-check { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: 0.82rem; cursor: pointer; transition: border-color .15s; }
+.ed-tag-check:hover { border-color: #bfdbfe; }
+.ed-tag-check input { width: 14px; height: 14px; accent-color: #2563eb; margin: 0; }
+
+/* Preview card */
+.ed-preview { position: sticky; top: 20px; padding: 18px 20px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-strong); display: grid; gap: 12px; }
+.ed-preview-title { margin: 0; font-family: var(--font-heading); font-size: 1rem; color: var(--text); }
+.ed-preview-company { margin: 0; font-size: 0.82rem; color: #2563eb; font-weight: 500; }
+.ed-preview-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ed-preview-fields { display: grid; gap: 8px; }
+.ed-preview-field { padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid #f1f5f9; }
+.ed-preview-field span { display: block; font-size: 0.67rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--border-strong); margin-bottom: 3px; }
+.ed-preview-field p { margin: 0; font-size: 0.82rem; color: var(--text); line-height: 1.45; }
+
+/* Count badge */
+.ed-count-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: var(--surface-muted); color: var(--muted); font-size: 0.72rem; font-weight: 700; }
+.ed-count-badge--sm { height: 17px; min-width: 17px; font-size: 0.66rem; }
+
+/* Empty */
+.ed-empty { display: flex; align-items: center; gap: 10px; padding: 20px; border: 1.5px dashed #e2e8f0; border-radius: 12px; font-size: 0.84rem; color: var(--border-strong); }
+.ed-empty p { margin: 0; }
+
+/* Opportunities list */
+.ed-opp-list { display: grid; gap: 8px; }
+.ed-opp-row { display: flex; align-items: center; gap: 14px; padding: 12px 16px; border: 1px solid #f1f5f9; border-radius: 12px; background: var(--surface-strong); transition: border-color .15s; }
+.ed-opp-row:hover, .ed-opp-row--active { border-color: #bfdbfe; background: var(--surface); }
+.ed-opp-info { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.ed-opp-title-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.ed-opp-title { font-size: 0.9rem; font-weight: 600; color: var(--text); }
+.ed-opp-meta { font-size: 0.76rem; color: var(--muted); }
+.ed-opp-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* Applications list */
+.ed-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.ed-filter-chip { height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font: inherit; font-size: 0.79rem; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all .15s; }
+.ed-filter-chip.active { border-color: #2563eb; background: #eff6ff; color: var(--chip-blue-text); font-weight: 600; }
+.ed-filter-count { font-size: 0.72rem; color: inherit; opacity: .7; }
+
+.ed-app-list { display: grid; gap: 10px; }
+.ed-app-card { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.ed-app-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ed-app-person { display: flex; align-items: center; gap: 11px; }
+.ed-app-avatar { width: 40px; height: 40px; border-radius: 50%; overflow: hidden; background: linear-gradient(135deg,#1e40af,#3b82f6); display: flex; align-items: center; justify-content: center; font-size: 0.82rem; font-weight: 700; color: #fff; flex-shrink: 0; border: 1px solid var(--border); }
+.ed-app-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.ed-app-name { display: grid; gap: 2px; }
+.ed-app-name strong { font-size: 0.9rem; font-weight: 600; color: var(--text); }
+.ed-app-name span { font-size: 0.76rem; color: var(--muted); }
+
+.ed-app-status { height: 22px; padding: 0 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; display: inline-flex; align-items: center; white-space: nowrap; }
+.ed-status--submitted { background: var(--chip-blue); color: var(--chip-blue-text); }
+.ed-status--in_review { background: var(--chip-purple); color: var(--chip-purple-text); }
+.ed-status--accepted { background: var(--chip-green); color: var(--success); }
+.ed-status--rejected { background: var(--surface-red); color: #991b1b; }
+.ed-status--reserve { background: #fef3c7; color: #92400e; }
+.ed-status--withdrawn { background: var(--surface-muted); color: var(--muted); }
+
+.ed-app-body { display: grid; grid-template-columns: minmax(0,1fr) 160px; gap: 8px; }
+.ed-app-detail { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--surface-strong); border: 1px solid #f1f5f9; }
+.ed-app-detail span { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--border-strong); }
+.ed-app-detail p { margin: 0; font-size: 0.84rem; color: var(--text); line-height: 1.5; }
+
+.ed-app-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Invite form */
+.ed-invite-form { display: grid; gap: 10px; padding: 14px; border: 1px solid #dbeafe; border-radius: 12px; background: var(--surface-blue); }
+.ed-invite-to { margin: 0; font-size: 0.84rem; color: var(--muted); }
+.ed-invite-to strong { color: var(--text); }
+.ed-invite-actions { display: flex; gap: 8px; }
+.ed-inline-error { margin: 0; font-size: 0.82rem; color: #dc2626; }
+
+/* AI body */
+.ed-ai-body { font-size: 0.9rem; line-height: 1.7; color: var(--text); }
+.ed-ai-body :deep(h3) { margin: 14px 0 5px; font-size: 0.95rem; font-weight: 600; color: var(--text); }
+.ed-ai-body :deep(p) { margin: 0 0 8px; }
+.ed-ai-body :deep(ul) { margin: 0 0 8px; padding-left: 18px; }
+.ed-ai-body :deep(li) { margin-bottom: 5px; }
+.ed-ai-body :deep(strong) { font-weight: 600; color: var(--text); }
+
+/* Buttons */
+.ed-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 16px; border-radius: 10px; border: 1px solid transparent; font: inherit; font-size: 0.875rem; font-weight: 500; cursor: pointer; text-decoration: none; transition: background .15s, border-color .15s; white-space: nowrap; }
+.ed-btn:disabled { opacity: .55; pointer-events: none; }
+.ed-btn-primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+.ed-btn-primary:hover { background: #1d4ed8; border-color: var(--chip-blue-text); }
+.ed-btn-ghost { background: transparent; border-color: var(--border); color: var(--muted); }
+.ed-btn-ghost:hover { background: var(--surface-strong); border-color: var(--border-strong); }
+.ed-btn-outline-blue { background: transparent; border-color: #bfdbfe; color: #2563eb; }
+.ed-btn-outline-blue:hover { background: #eff6ff; }
+.ed-btn-white { background: rgba(255,255,255,.15); border-color: rgba(255,255,255,.35); color: #fff; }
+.ed-btn-white:hover { background: rgba(255,255,255,.25); }
+.ed-btn-sm { min-height: 30px; padding: 0 12px; font-size: 0.8rem; border-radius: 8px; }
+
+/* Responsive */
+@media (max-width: 1000px) {
+  .ed-opp-layout { grid-template-columns: 1fr; }
+  .ed-preview { position: static; }
+}
+@media (max-width: 800px) {
+  .ed-top-grid { grid-template-columns: 1fr; }
+  .ed-highlights-grid { grid-template-columns: 1fr 1fr; }
+  .ed-app-body { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .ed-hero-body { flex-direction: column; padding: 0 18px 20px; }
+  .ed-co-avatar { margin-top: -28px; width: 68px; height: 68px; }
+  .ed-fields { grid-template-columns: 1fr; }
+  .ed-highlights-grid { grid-template-columns: 1fr; }
+}
+
+/* ─── legacy stubs (keep so Vue doesn't warn) ───────────────────── */
 .dashboard,
 .dashboard-grid,
 .dashboard-section,
@@ -1380,9 +1490,9 @@ watch(
   display: grid;
   gap: 14px;
   padding: 16px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--surface);
 }
 
 .managed-opportunity-actions,
@@ -1404,6 +1514,46 @@ watch(
   text-transform: capitalize;
 }
 
+.ai-analysis-panel {
+  border-color: rgba(53, 96, 223, 0.2);
+  background: rgba(245, 248, 255, 0.95);
+}
+
+.ai-analysis-body {
+  line-height: 1.65;
+  font-size: 0.93rem;
+  color: var(--text);
+}
+
+.ai-analysis-body :deep(h3) {
+  margin: 16px 0 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ai-analysis-body :deep(p) {
+  margin: 0 0 10px;
+}
+
+.ai-analysis-body :deep(ul) {
+  margin: 0 0 10px;
+  padding-left: 20px;
+}
+
+.ai-analysis-body :deep(li) {
+  margin-bottom: 6px;
+}
+
+.ai-analysis-body :deep(strong) {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ai-analysis-body :deep(section) {
+  margin-bottom: 14px;
+}
+
 .filter-row {
   justify-content: flex-start;
 }
@@ -1413,7 +1563,7 @@ watch(
   padding: 0 12px;
   border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: #4c5b70;
   font: inherit;
   cursor: pointer;
@@ -1439,7 +1589,7 @@ watch(
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 50%;
-  background: #eef3f8;
+  background: var(--surface-muted);
 }
 
 .application-copy {
@@ -1448,7 +1598,7 @@ watch(
 }
 
 .application-copy strong {
-  color: #162033;
+  color: var(--text);
 }
 
 .application-copy span,
@@ -1463,15 +1613,15 @@ watch(
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  background: #eef3f8;
-  color: #24456b;
+  background: var(--surface-muted);
+  color: var(--muted);
   font-size: 0.8rem;
   font-weight: 600;
 }
 
 .application-status.status-submitted {
-  background: #eef3f8;
-  color: #24456b;
+  background: var(--surface-muted);
+  color: var(--muted);
 }
 
 .application-status.status-in_review {
@@ -1496,7 +1646,7 @@ watch(
 
 .application-status.status-withdrawn {
   background: rgba(95, 107, 122, 0.16);
-  color: #5f6b7a;
+  color: var(--muted);
 }
 
 .application-grid,
@@ -1519,7 +1669,7 @@ watch(
 }
 
 .application-detail p {
-  color: #162033;
+  color: var(--text);
 }
 
 .invite-form {
@@ -1542,7 +1692,7 @@ watch(
 .section-card,
 .dashboard-section {
   padding: 24px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 18px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 251, 0.94));
@@ -1586,9 +1736,9 @@ watch(
 .metric-chip {
   min-width: 180px;
   padding: 14px 16px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.84);
+  background: var(--surface);
   backdrop-filter: blur(10px);
 }
 
@@ -1634,9 +1784,9 @@ watch(
   display: grid;
   gap: 6px;
   padding: 16px 18px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--surface);
 }
 
 .highlight-pill strong {
@@ -1652,7 +1802,7 @@ watch(
 .hint-card {
   max-width: 360px;
   padding: 16px 18px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 14px;
   background: rgba(250, 251, 253, 0.92);
 }
@@ -1706,9 +1856,9 @@ h1 {
 .status-banner {
   margin: 0;
   padding: 14px 16px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--surface);
   font-size: 0.9rem;
 }
 
@@ -1723,9 +1873,9 @@ h1 {
   display: grid;
   gap: 12px;
   padding: 18px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--surface);
   backdrop-filter: blur(10px);
 }
 
@@ -1770,7 +1920,7 @@ h1 {
   padding: 12px 14px;
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--surface);
 }
 
 .summary-card span {
@@ -1779,7 +1929,7 @@ h1 {
 }
 
 .summary-card strong {
-  color: #162033;
+  color: var(--text);
   font-size: 0.94rem;
   line-height: 1.35;
 }
@@ -1810,7 +1960,7 @@ h1 {
   display: grid;
   gap: 16px;
   padding: 20px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 16px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 249, 252, 0.92));
@@ -1857,7 +2007,7 @@ h1 {
 }
 
 .field > span {
-  color: #334155;
+  color: var(--text);
   font-size: 0.82rem;
   font-weight: 600;
 }
@@ -1896,7 +2046,7 @@ h1 {
   border-radius: 10px;
   font: inherit;
   font-size: 0.9rem;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--surface);
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease,
@@ -1935,7 +2085,7 @@ h1 {
   padding: 9px 12px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--surface);
   font-size: 0.85rem;
 }
 
@@ -1995,9 +2145,9 @@ h1 {
 
 .preview-grid div {
   padding: 14px 15px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
+  border: 1px solid var(--border);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--surface);
 }
 
 .preview-grid strong {
@@ -2013,7 +2163,7 @@ h1 {
   padding: 0 12px;
   border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--surface);
   font-size: 0.82rem;
 }
 
@@ -2062,4 +2212,24 @@ h1 {
     font-size: 1.8rem;
   }
 }
+</style>
+
+<style scoped>
+:global(.dark) .ed-co-avatar { border-color: var(--surface); }
+:global(.dark) .ed-chip--green  { background: #091a0d; color: #4ade80; }
+:global(.dark) .ed-chip--blue   { background: #0f1e38; color: #60a5fa; }
+:global(.dark) .ed-banner--error { border-color: #7f1d1d; background: #1f0808; color: #fca5a5; }
+:global(.dark) .ed-banner--info  { border-color: #14532d; background: #091a0d; color: #4ade80; }
+:global(.dark) .ed-card--verify  { background: #0a1020; border-color: var(--accent-soft); }
+:global(.dark) .ed-card--ai      { background: #130e22; border-color: #4c1d95; }
+:global(.dark) .ed-status--submitted { background: #0f1e38; color: #60a5fa; }
+:global(.dark) .ed-status--in_review { background: #130e22; color: #a78bfa; }
+:global(.dark) .ed-status--accepted  { background: #091a0d; color: #4ade80; }
+:global(.dark) .ed-status--rejected  { background: #1f0808; color: #fca5a5; }
+:global(.dark) .ed-status--reserve   { background: #1c1205; color: #fbbf24; }
+:global(.dark) .ed-status--withdrawn { background: var(--surface-muted); color: var(--muted); }
+:global(.dark) .ed-invite-form { background: #0a1020; border-color: var(--accent-soft); }
+:global(.dark) .ed-tag-check { background: var(--surface); border-color: var(--border); color: var(--muted); }
+:global(.dark) .ed-tag-check:hover { border-color: var(--accent); }
+:global(.dark) .ed-preview { background: var(--surface-strong); border-color: var(--border); }
 </style>

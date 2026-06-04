@@ -47,12 +47,11 @@ const dashboardTarget = computed(() => {
 
 const contacts = computed(() => network.contacts.value)
 const requests = computed(() => network.requests.value)
-const filteredContacts = computed(() => contacts.value)
-const incomingRequests = computed(() =>
-  requests.value.filter((item) => item.direction === 'incoming'),
+const filteredContacts = computed(() =>
+  contacts.value.filter((c) => Boolean(c.userId)),
 )
-const outgoingRequests = computed(() =>
-  requests.value.filter((item) => item.direction === 'outgoing'),
+const incomingRequests = computed(() =>
+  requests.value.filter((item) => item.direction === 'incoming' && item.status === 'pending'),
 )
 const fallbackDirectory = computed(() => {
   const byUserId = new Map<
@@ -73,7 +72,7 @@ const fallbackDirectory = computed(() => {
     }
   >()
 
-  for (const item of [...contacts.value, ...incomingRequests.value, ...outgoingRequests.value]) {
+  for (const item of contacts.value) {
     if (!item.userId || item.userId === session.currentUser.value?.id) {
       continue
     }
@@ -108,8 +107,15 @@ const heroDescription = computed(() =>
     ? 'Здесь собраны соискатели, с которыми у вас уже есть контакт или запрос в сеть. Открывайте профиль и добавляйте новые коннекты.'
     : 'Управляйте текущими контактами, входящими и исходящими запросами, а также быстро переходите в чат.',
 )
-const studentCards = computed(() =>
-  students.value.length
+const hasActiveFilters = computed(() =>
+  Boolean(filters.search || filters.universityName || filters.faculty || filters.specialization || filters.studyYear),
+)
+
+const studentCards = computed(() => {
+  const hasStudents = students.value.length > 0
+  const useStudents = hasStudents || hasActiveFilters.value
+
+  return useStudents
     ? students.value
         .filter((item) => item.user_id && item.user_id !== session.currentUser.value?.id)
         .map((item) => {
@@ -135,8 +141,8 @@ const studentCards = computed(() =>
             portfolioCount: item.portfolio_count ?? 0,
           }
         })
-    : fallbackDirectory.value,
-)
+    : fallbackDirectory.value
+})
 
 async function handleOpenChat(userId: string) {
   chatLoadingUserId.value = userId
@@ -215,433 +221,688 @@ watch(
 
 <template>
   <main class="page-shell">
-    <section class="contacts-page">
-      <header class="contacts-hero">
-        <div class="hero-copy">
-          <p class="eyebrow">Network</p>
-          <h1>{{ heroTitle }}</h1>
-          <p>{{ heroDescription }}</p>
+    <div class="cp-root">
+
+      <!-- Hero -->
+      <header class="cp-hero">
+        <div class="cp-hero-inner">
+          <div class="cp-hero-text">
+            <p class="cp-eyebrow">Contacts</p>
+            <h1 class="cp-title">{{ heroTitle }}</h1>
+            <p class="cp-subtitle">{{ heroDescription }}</p>
+          </div>
+          <div class="cp-hero-stats">
+            <div class="cp-stat">
+              <span class="cp-stat-value">{{ studentCards.length }}</span>
+              <span class="cp-stat-label">соискателей</span>
+            </div>
+            <div class="cp-stat">
+              <span class="cp-stat-value">{{ filteredContacts.length }}</span>
+              <span class="cp-stat-label">контактов</span>
+            </div>
+            <div class="cp-stat">
+              <span class="cp-stat-value">{{ incomingRequests.length }}</span>
+              <span class="cp-stat-label">запросов</span>
+            </div>
+          </div>
         </div>
-        <div class="hero-actions">
-          <RouterLink :to="dashboardTarget" class="ghost-button">В кабинет</RouterLink>
-          <RouterLink to="/chats" class="ghost-button">Чаты</RouterLink>
+        <div class="cp-hero-actions">
+          <RouterLink :to="dashboardTarget" class="cp-btn cp-btn-ghost">В кабинет</RouterLink>
+          <RouterLink to="/chats" class="cp-btn cp-btn-ghost">Чаты</RouterLink>
         </div>
       </header>
 
-      <article class="section-card compact">
-        <div class="section-head">
-          <div>
-            <p class="section-label">Поиск</p>
-            <h2>Найти соискателя</h2>
+      <!-- Search -->
+      <div class="cp-search-card">
+        <div class="cp-search-label">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          Поиск соискателей
+        </div>
+        <div class="cp-search-grid">
+          <input v-model="filters.search" class="cp-input cp-input-wide" type="text" placeholder="Имя, университет или специализация…" />
+          <input v-model="filters.universityName" class="cp-input" type="text" placeholder="Университет" />
+          <input v-model="filters.faculty" class="cp-input" type="text" placeholder="Факультет" />
+          <input v-model="filters.specialization" class="cp-input" type="text" placeholder="Специализация" />
+          <input v-model="filters.studyYear" class="cp-input cp-input-narrow" type="number" min="1" placeholder="Курс" />
+        </div>
+      </div>
+
+      <!-- Main layout -->
+      <div class="cp-layout">
+
+        <!-- Left: directory -->
+        <div class="cp-main">
+          <div class="cp-section-header">
+            <div>
+              <p class="cp-section-eyebrow">Каталог</p>
+              <h2 class="cp-section-title">Соискатели</h2>
+            </div>
+            <span class="cp-count-badge">{{ studentCards.length }}</span>
+          </div>
+
+          <div v-if="listLoading" class="cp-status">
+            <div class="cp-spinner"></div>
+            Загружаем список…
+          </div>
+          <div v-else-if="listError && studentCards.length" class="cp-status cp-status-warn">{{ listError }}</div>
+          <div v-else-if="listError" class="cp-status cp-status-error">{{ listError }}</div>
+          <div v-else-if="!studentCards.length" class="cp-empty">
+            <div class="cp-empty-icon">👤</div>
+            <strong>Соискатели не найдены</strong>
+            <p>Попробуйте изменить поиск или фильтры.</p>
+          </div>
+
+          <div v-else class="cp-directory-grid">
+            <article
+              v-for="item in studentCards"
+              :key="item.id"
+              class="cp-student-card"
+              role="button"
+              tabindex="0"
+              @click="savePreview(item.userId, item.displayName, item.avatarUrl, item.headline); router.push(`/profiles/students/${item.userId}`)"
+              @keydown.enter="savePreview(item.userId, item.displayName, item.avatarUrl, item.headline); router.push(`/profiles/students/${item.userId}`)"
+            >
+              <div class="cp-student-top">
+                <div class="cp-student-avatar">
+                  <img v-if="item.avatarUrl" :src="item.avatarUrl" :alt="item.displayName" class="cp-avatar-img" />
+                  <span v-else class="cp-avatar-fallback">{{ item.displayName.slice(0, 2).toUpperCase() }}</span>
+                </div>
+                <div class="cp-student-body">
+                  <strong class="cp-student-name">{{ item.displayName }}</strong>
+                  <span class="cp-student-headline">{{ item.headline }}</span>
+                </div>
+              </div>
+              <div v-if="item.studyYear || item.graduationYear || item.hasResume || item.hasPortfolio" class="cp-student-tags">
+                <span v-if="item.studyYear" class="cp-tag">{{ item.studyYear }}</span>
+                <span v-if="item.graduationYear" class="cp-tag">{{ item.graduationYear }}</span>
+                <span v-if="item.hasResume" class="cp-tag cp-tag-green">Резюме</span>
+                <span v-if="item.hasPortfolio" class="cp-tag cp-tag-blue">Портфолио</span>
+              </div>
+            </article>
           </div>
         </div>
-        <div class="search-grid">
-          <input v-model="filters.search" type="text" placeholder="Имя, университет или специализация" />
-          <input v-model="filters.universityName" type="text" placeholder="Университет" />
-          <input v-model="filters.faculty" type="text" placeholder="Факультет" />
-          <input v-model="filters.specialization" type="text" placeholder="Специализация" />
-          <input v-model="filters.studyYear" type="number" min="1" placeholder="Курс" />
-        </div>
-        <div class="search-meta-row">
-          <span class="search-meta">{{ studentCards.length }} соискателей</span>
-        </div>
-      </article>
 
-      <section class="content-grid1">
-        <div class="main-column">
-          <article class="section-card">
-            <div class="section-head">
+        <!-- Right: network -->
+        <aside class="cp-sidebar">
+
+          <!-- Contacts -->
+          <div class="cp-sidebar-section">
+            <div class="cp-section-header">
               <div>
-                <p class="section-label">Соискатели</p>
-                <h2>Каталог кандидатов</h2>
+                <p class="cp-section-eyebrow">Сеть</p>
+                <h2 class="cp-section-title">Ваши контакты</h2>
               </div>
-            </div>
-            <p v-if="listLoading" class="status-banner">Загружаем список соискателей...</p>
-            <p v-else-if="listError && studentCards.length" class="status-banner">
-              {{ listError }} Показываем контакты и запросы, которые уже есть в вашей сети.
-            </p>
-            <p v-else-if="listError" class="status-banner error">{{ listError }}</p>
-            <div v-else-if="!studentCards.length" class="empty-directory">
-              <strong>Соискатели не найдены</strong>
-              <p>Попробуйте изменить поиск или фильтры.</p>
-            </div>
-            <div v-else class="directory-grid">
-              <article v-for="item in studentCards" :key="item.id" class="student-card">
-                <div class="student-card-head">
-                  <div class="student-avatar">
-                    <img v-if="item.avatarUrl" :src="item.avatarUrl" :alt="item.displayName" class="student-avatar-image" />
-                    <span v-else class="student-avatar-fallback">{{ item.displayName.slice(0, 2).toUpperCase() }}</span>
-                  </div>
-                  <div class="student-copy">
-                    <strong>{{ item.displayName }}</strong>
-                    <span>{{ item.headline }}</span>
-                  </div>
-                </div>
-
-                <div class="student-actions">
-                  <button
-                    class="primary-button"
-                    type="button"
-                    :disabled="chatLoadingUserId === item.userId"
-                    @click="handleOpenChat(item.userId)"
-                  >
-                    {{ chatLoadingUserId === item.userId ? 'Открываем чат...' : 'Написать' }}
-                  </button>
-                </div>
-              </article>
-            </div>
-          </article>
-
-          <article class="section-card">
-            <div class="section-head">
-              <div>
-                <p class="section-label">Контакты</p>
-                <h2>Ваши связи</h2>
-              </div>
+              <span v-if="filteredContacts.length" class="cp-count-badge">{{ filteredContacts.length }}</span>
             </div>
 
             <ContactsList
               :items="filteredContacts"
+              :get-item-link="(item) => `/profiles/students/${item.userId}`"
               empty-title="Контактов пока нет"
               empty-text="Когда вы примете запрос или добавите соискателя в сеть, контакт появится здесь."
+            />
+          </div>
+
+          <!-- Incoming requests -->
+          <div class="cp-sidebar-section">
+            <div class="cp-section-header">
+              <div>
+                <p class="cp-section-eyebrow">Входящие</p>
+                <h2 class="cp-section-title">Запросы</h2>
+              </div>
+              <span v-if="incomingRequests.length" class="cp-count-badge cp-count-badge-accent">{{ incomingRequests.length }}</span>
+            </div>
+
+            <ContactRequestsList
+              :items="incomingRequests"
+              empty-title="Входящих запросов нет"
+              empty-text="Новые запросы появятся здесь."
             >
               <template #actions="{ item }">
                 <RouterLink
                   :to="`/profiles/students/${item.userId}`"
-                  class="ghost-button"
+                  class="cp-btn cp-btn-ghost cp-btn-sm"
                   @click="savePreview(item.userId, item.displayName, item.avatarUrl, item.headline)"
                 >
                   Профиль
                 </RouterLink>
                 <button
-                  class="primary-button"
+                  v-if="item.status === 'pending'"
+                  class="cp-btn cp-btn-primary cp-btn-sm"
                   type="button"
-                  :disabled="chatLoadingUserId === item.userId"
-                  @click="handleOpenChat(item.userId)"
+                  :disabled="network.updatingByRequestId.value[item.id]"
+                  @click="handleRequestAction(() => network.acceptRequest(item.id), 'Запрос принят.')"
                 >
-                  {{ chatLoadingUserId === item.userId ? 'Открываем чат...' : 'Написать' }}
+                  {{ network.updatingByRequestId.value[item.id] ? '…' : 'Принять' }}
+                </button>
+                <button
+                  v-if="item.status === 'pending'"
+                  class="cp-btn cp-btn-ghost cp-btn-sm"
+                  type="button"
+                  :disabled="network.updatingByRequestId.value[item.id]"
+                  @click="handleRequestAction(() => network.rejectRequest(item.id), 'Запрос отклонён.')"
+                >
+                  Отклонить
                 </button>
               </template>
-            </ContactsList>
-          </article>
-
-          <div class="requests-grid">
-            <article class="section-card">
-              <div class="section-head">
-                <div>
-                  <p class="section-label">Входящие</p>
-                  <h2>Запросы от соискателей</h2>
-                </div>
-              </div>
-
-              <ContactRequestsList
-                :items="incomingRequests"
-                empty-title="Входящих запросов нет"
-                empty-text="Новые запросы появятся здесь."
-              >
-                <template #actions="{ item }">
-                  <RouterLink
-                    :to="`/profiles/students/${item.userId}`"
-                    class="ghost-button"
-                    @click="savePreview(item.userId, item.displayName, item.avatarUrl, item.headline)"
-                  >
-                    Профиль
-                  </RouterLink>
-                  <button
-                    v-if="item.status === 'pending'"
-                    class="primary-button"
-                    type="button"
-                    :disabled="network.updatingByRequestId.value[item.id]"
-                    @click="handleRequestAction(() => network.acceptRequest(item.id), 'Запрос принят.')"
-                  >
-                    {{ network.updatingByRequestId.value[item.id] ? 'Сохраняем...' : 'Принять' }}
-                  </button>
-                  <button
-                    v-if="item.status === 'pending'"
-                    class="ghost-button"
-                    type="button"
-                    :disabled="network.updatingByRequestId.value[item.id]"
-                    @click="handleRequestAction(() => network.rejectRequest(item.id), 'Запрос отклонён.')"
-                  >
-                    Отклонить
-                  </button>
-                </template>
-              </ContactRequestsList>
-            </article>
-
+            </ContactRequestsList>
           </div>
-        </div>
-      </section>
 
-      <RecommendationComposer
-        v-if="recommendationTarget"
-        :open="Boolean(recommendationTarget)"
-        :to-user-id="recommendationTarget.userId"
-        :target-label="recommendationTarget.label"
-        @close="recommendationTarget = null"
-        @submitted="recommendationTarget = null"
-      />
-    </section>
+        </aside>
+      </div>
+
+    </div>
+
+    <RecommendationComposer
+      v-if="recommendationTarget"
+      :open="Boolean(recommendationTarget)"
+      :to-user-id="recommendationTarget.userId"
+      :target-label="recommendationTarget.label"
+      @close="recommendationTarget = null"
+      @submitted="recommendationTarget = null"
+    />
   </main>
 </template>
 
 <style scoped>
-.contacts-page,
-.content-grid,
-.main-column,
-.side-column,
-.requests-grid {
+/* ── Root ── */
+.cp-root {
   display: grid;
-  gap: 16px;
-}
-
-.contacts-page {
-  max-width: 1240px;
+  gap: 20px;
+  max-width: 1280px;
   margin: 0 auto;
+  padding: 0 4px;
 }
 
-.contacts-hero,
-.section-card,
-.status-banner {
-  padding: 20px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.05);
-}
-
-.contacts-hero,
-.section-head,
-.hero-actions {
+/* ── Hero ── */
+.cp-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 32px 32px 28px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 55%, #3b82f6 100%);
+  color: #fff;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  align-items: start;
+  gap: 20px;
+  align-items: flex-end;
   justify-content: space-between;
 }
 
-.hero-copy {
+.cp-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.04'%3E%3Ccircle cx='30' cy='30' r='28'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E") repeat;
+  pointer-events: none;
+}
+
+.cp-hero-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-end;
+}
+
+.cp-hero-text {
   display: grid;
   gap: 8px;
 }
 
-.eyebrow,
-.section-label {
+.cp-eyebrow {
   margin: 0;
-  color: #2952cc;
-  font: 700 0.72rem/1 var(--font-mono);
+  font: 700 0.68rem/1 var(--font-mono, monospace);
   text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255,255,255,0.65);
 }
 
-h1,
-h2,
-p {
+.cp-title {
   margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  color: #fff;
+  line-height: 1.15;
 }
 
-h1,
-h2 {
-  color: #162033;
+.cp-subtitle {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(255,255,255,0.75);
+  max-width: 440px;
+  line-height: 1.6;
+}
+
+.cp-hero-stats {
+  display: flex;
+  gap: 24px;
+}
+
+.cp-stat {
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+
+.cp-stat-value {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1;
   font-family: var(--font-heading);
 }
 
-h1 {
-  font-size: clamp(1.8rem, 3vw, 2.4rem);
+.cp-stat-label {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-.content-grid {
-  grid-template-columns: minmax(0, 1fr) 320px;
+.cp-hero-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Search ── */
+.cp-search-card {
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 2px 12px rgba(15,23,42,0.04);
+  display: grid;
+  gap: 12px;
+}
+
+.cp-search-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cp-search-label svg {
+  flex-shrink: 0;
+  color: var(--border-strong);
+}
+
+.cp-search-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr 80px;
+  gap: 10px;
+}
+
+/* ── Inputs ── */
+.cp-input {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-strong);
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  outline: none;
+}
+
+.cp-input::placeholder {
+  color: var(--border-strong);
+}
+
+.cp-input:focus {
+  border-color: #3b82f6;
+  background: var(--surface);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+}
+
+/* ── Main layout ── */
+.cp-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 20px;
   align-items: start;
 }
 
-.requests-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.section-card.compact {
-  gap: 14px;
-}
-
-.search-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.search-grid input {
-  min-height: 44px;
-  padding: 0 13px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  border-radius: 10px;
-  background: #fff;
-  font: inherit;
-}
-
-.search-meta-row {
+/* ── Section headers ── */
+.cp-section-header {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: space-between;
-}
-
-.section-copy,
-.hero-copy p,
-.field span,
-.search-meta,
-.status-banner {
-  color: #5f6b7a;
-  line-height: 1.5;
-}
-
-.directory-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
-
-.student-card,
-.empty-directory {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid rgba(18, 38, 63, 0.08);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.92);
-}
-
-.student-card {
-  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-}
-
-.empty-directory p,
-.student-about {
-  margin: 0;
-  color: #5f6b7a;
-  line-height: 1.55;
-}
-
-.student-card-head,
-.student-actions {
-  display: flex;
-  flex-wrap: wrap;
+  justify-content: space-between;
   gap: 10px;
+  margin-bottom: 14px;
 }
 
-.student-card-head {
-  display: contents;
+.cp-section-eyebrow {
+  margin: 0 0 2px;
+  font: 700 0.65rem/1 var(--font-mono, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #3b82f6;
 }
 
-.student-avatar {
-  width: 46px;
-  height: 46px;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
+.cp-section-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+.cp-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.cp-count-badge-accent {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+/* ── Status / empty states ── */
+.cp-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.cp-status-warn {
+  border-color: var(--border-yellow);
+  background: var(--surface-yellow);
+  color: #92400e;
+}
+
+.cp-status-error {
+  border-color: var(--border-red);
+  background: var(--surface-red);
+  color: #991b1b;
+}
+
+.cp-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e2e8f0;
+  border-top-color: #3b82f6;
   border-radius: 50%;
-  border: 1px solid #d7dee7;
-  background: #eef3f8;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
 }
 
-.student-avatar-image {
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.cp-empty {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  text-align: center;
+  padding: 40px 20px;
+  border: 1.5px dashed #e2e8f0;
+  border-radius: 16px;
+  color: var(--muted);
+}
+
+.cp-empty-icon {
+  font-size: 2rem;
+  margin-bottom: 4px;
+  filter: grayscale(0.3);
+}
+
+.cp-empty strong {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.cp-empty p {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--border-strong);
+}
+
+/* ── Directory grid ── */
+.cp-directory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+/* ── Student card ── */
+.cp-student-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  cursor: pointer;
+}
+
+.cp-student-card:hover {
+  border-color: #bfdbfe;
+  box-shadow: 0 4px 16px rgba(59,130,246,0.1);
+  transform: translateY(-1px);
+}
+
+.cp-student-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.cp-avatar-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.student-avatar-fallback {
-  color: #24456b;
-  font-size: 0.9rem;
+.cp-avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  color: #fff;
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
-.student-copy {
+.cp-student-body {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
-.student-copy strong {
-  color: #162033;
-  line-height: 1.3;
+.cp-student-top {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
-.student-copy span {
-  color: #5f6b7a;
-  line-height: 1.45;
-  font-size: 0.92rem;
-}
-
-.student-actions > * {
-  min-height: 40px;
-  padding: 0 16px;
+.cp-student-name {
   font-size: 0.9rem;
-}
-
-.status-banner.error {
-  color: var(--danger);
-}
-
-.request-form {
-  display: grid;
-  gap: 12px;
-}
-
-.field {
-  display: grid;
-  gap: 8px;
-}
-
-.field span {
-  font-size: 0.82rem;
   font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.field input,
-.field textarea {
-  min-height: 44px;
-  padding: 11px 13px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+.cp-student-headline {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cp-student-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.cp-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 5px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cp-tag-green {
+  background: var(--chip-green);
+  color: var(--success);
+}
+
+.cp-tag-blue {
+  background: var(--chip-blue);
+  color: var(--chip-blue-text);
+}
+
+/* ── Sidebar ── */
+.cp-sidebar {
+  display: grid;
+  gap: 16px;
+}
+
+.cp-sidebar-section {
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 2px 10px rgba(15,23,42,0.04);
+}
+
+/* ── Buttons ── */
+.cp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 16px;
   border-radius: 10px;
-  background: #fff;
+  border: 1px solid transparent;
   font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  white-space: nowrap;
 }
 
-.field textarea {
-  min-height: 120px;
-  resize: vertical;
+.cp-btn:active { transform: scale(0.97); }
+.cp-btn:disabled { opacity: 0.55; pointer-events: none; }
+
+.cp-btn-primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.cp-btn-primary:hover { background: #1d4ed8; border-color: var(--chip-blue-text); }
+
+.cp-btn-ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--muted);
+}
+.cp-btn-ghost:hover { background: var(--surface-strong); border-color: var(--border-strong); }
+
+.cp-btn-purple {
+  background: #7c3aed;
+  border-color: #7c3aed;
+  color: #fff;
+}
+.cp-btn-purple:hover { background: #6d28d9; border-color: var(--chip-purple-text); }
+
+.cp-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-self: flex-start;
 }
 
-@media (max-width: 1024px) {
-  .content-grid,
-  .requests-grid,
-  .search-grid,
-  .directory-grid {
+/* For hero white ghost buttons */
+.cp-hero .cp-btn-ghost {
+  border-color: rgba(255,255,255,0.35);
+  color: #fff;
+  background: rgba(255,255,255,0.1);
+}
+.cp-hero .cp-btn-ghost:hover { background: rgba(255,255,255,0.2); }
+
+.cp-btn-sm {
+  min-height: 30px;
+  padding: 0 12px;
+  font-size: 0.8rem;
+  border-radius: 8px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 1100px) {
+  .cp-layout {
     grid-template-columns: 1fr;
   }
-}
-
-@media (max-width: 720px) {
-  .contacts-hero,
-  .section-card,
-  .status-banner {
-    padding: 16px;
-  }
-
-  .student-card {
-    grid-template-columns: 1fr;
-    align-items: start;
-  }
-
-  .student-card-head {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 10px;
-    align-items: center;
-  }
-
-  .student-actions {
-    justify-content: start;
+  .cp-sidebar {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    grid-auto-flow: dense;
   }
 }
+
+@media (max-width: 860px) {
+  .cp-search-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .cp-input-wide { grid-column: 1 / -1; }
+  .cp-input-narrow { grid-column: auto; }
+}
+
+@media (max-width: 640px) {
+  .cp-hero { padding: 24px 20px 20px; }
+  .cp-hero-stats { gap: 16px; }
+  .cp-stat-value { font-size: 1.3rem; }
+  .cp-search-grid { grid-template-columns: 1fr; }
+  .cp-sidebar { grid-template-columns: 1fr; }
+  .cp-directory-grid { grid-template-columns: 1fr; }
+  .cp-student-card { grid-template-columns: 40px minmax(0,1fr) auto; }
+}
+
+:global(.dark) .cp-status-warn  { border-color: #78350f; background: #1c1205; color: #fbbf24; }
+:global(.dark) .cp-status-error { border-color: #7f1d1d; background: #1f0808; color: #fca5a5; }
+:global(.dark) .cp-tag-green { background: #091a0d; color: #4ade80; }
+:global(.dark) .cp-tag-blue  { background: #0f1e38; color: #60a5fa; }
+:global(.dark) .cp-btn-purple { background: #4c1d95; border-color: #4c1d95; }
+:global(.dark) .cp-btn-purple:hover { background: #5b21b6; border-color: #5b21b6; }
 </style>
